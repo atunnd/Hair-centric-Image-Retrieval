@@ -65,11 +65,11 @@ class HairEncoder:
         checkpoint_model = checkpoint['model']
         state_dict = model.state_dict()
         
-        # Remove incompatible keys
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and k in state_dict and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+        model = models_vit.__dict__[self.model_name](
+            drop_path_rate=0.1,
+            global_pool=True,
+            init_values=None,
+        )
         
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print("Model loading message:", msg)
