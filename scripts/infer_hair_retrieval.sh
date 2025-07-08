@@ -4,4 +4,7 @@ python src/hair_retrieval.py \
     --embed_save_dir "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/HairLearning/baselines/Siamese-Image-Modeling/embeddings" \
     --batch_size 32 \
     --top_k 10 \
-    --retrieve_only 
+    --save_visualization \
+    --num_queries 5 \
+    --vis_save_dir "save/visualizations" \
+    --random_seed 420 
