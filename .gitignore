@@ -9,6 +9,7 @@ __pycache__/
 # folders
 /save
 /data
+/weights
 
 # Distribution / packaging
 .Python
