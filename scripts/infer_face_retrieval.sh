@@ -1,5 +1,5 @@
 python src/face_retrieval.py \
-    --ckpt_path "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/Composed-Image-Retrieval/weights/face_encoder/Backbone_VIT_Epoch_2_Batch_20000_Time_2021-01-12-16-48_checkpoint.pth" \
+    --ckpt_path "weights/face_encoder/Backbone_VITs_Epoch_2_Batch_12000_Time_2021-03-17-04-05_checkpoint.pth" \
     --data_path "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/Composed-Image-Retrieval/data/" \
     --embed_save_dir "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/Composed-Image-Retrieval/save/embeddings" \
     --batch_size 32 \
@@ -7,4 +7,5 @@ python src/face_retrieval.py \
     --save_visualization \
     --num_queries 5 \
     --vis_save_dir "save/visualizations" \
-    --random_seed 421
+    --random_seed 421 \
+    --model_name 'VITs'

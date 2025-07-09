@@ -53,19 +53,36 @@ class FaceEncoder:
         """Build the vision transformer model"""
         if self.model_name == "VIT":
             model = ViT_face(
-            image_size=112,
-            patch_size=8,
-            loss_type='CosFace',
-            GPU_ID= 'cuda:0',
-            num_class=93431,
-            dim=512,
-            depth=20,
-            heads=8,
-            mlp_dim=2048,
-            dropout=0.1,
-            emb_dropout=0.1,
-            pool='cls'
-        )
+                image_size=112,
+                patch_size=8,
+                loss_type='CosFace',
+                GPU_ID= 'cuda:0',
+                num_class=93431,
+                dim=512,
+                depth=20,
+                heads=8,
+                mlp_dim=2048,
+                dropout=0.1,
+                emb_dropout=0.1,
+                pool='cls'
+                )
+        elif self.model_name == "VITs":
+            model = ViTs_face(
+                image_size=112,
+                patch_size=8,
+                loss_type='CosFace',
+                GPU_ID= 'cuda:0',
+                num_class=93431,
+                ac_patch_size = 12,
+                pad=4,
+                dim=512,
+                depth=20,
+                heads=8,
+                mlp_dim=2048,
+                dropout=0.1,
+                emb_dropout=0.1,
+                pool='cls'
+                )
         
         return model
     
@@ -213,7 +230,7 @@ class FeatureExtractor:
 
 
 class FaceRetrievalVisualizer:
-    """Visualization utilities for hair retrieval results"""
+    """Visualization utilities for face retrieval results"""
     
     def __init__(self, vis_save_dir="visualizations"):
         self.vis_save_dir = vis_save_dir
@@ -221,7 +238,7 @@ class FaceRetrievalVisualizer:
     
     def load_image_for_vis(self, image_path, target_size=(224, 224)):
         """Load image for visualization without normalization"""
-        # display_path = full_face_dir + image_path.split("/")[-1].replace("_hair.png", ".jpg")
+        # display_path = full_face_dir + image_path.split("/")[-1].replace("_face.png", ".jpg")
         display_path = image_path
         image = Image.open(display_path).convert('RGB')
         image = image.resize(target_size, Image.Resampling.LANCZOS)
@@ -303,7 +320,7 @@ class FaceRetrievalVisualizer:
         plt.close()
         print(f"Saved combined visualization to: {save_path}")
     
-    def visualize_multiple_queries(self, hair_encoder, embeddings, paths, num_queries=5, top_k=5, random_seed=42):
+    def visualize_multiple_queries(self, face_encoder, embeddings, paths, num_queries=5, top_k=5, random_seed=42):
         """Visualize retrieval results for multiple random query images"""
         print(f"\nGenerating visualizations for {num_queries} random query images...")
         
@@ -326,7 +343,7 @@ class FaceRetrievalVisualizer:
             query_embedding = embeddings[query_idx]
             
             # Retrieve similar images
-            results = hair_encoder.retrieve_similar_images(query_embedding, embeddings, paths, top_k=top_k)
+            results = face_encoder.retrieve_similar_images(query_embedding, embeddings, paths, top_k=top_k)
             
             # Store for combined visualization
             all_visualizations.append((query_path, results))

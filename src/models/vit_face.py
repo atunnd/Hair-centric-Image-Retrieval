@@ -393,8 +393,8 @@ class ViT_face(nn.Module):
         x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
         #print("After: ", x.shape) => 1, 512
         
-        # x = self.to_latent(x)
-        # emb = self.mlp_head(x)
+        x = self.to_latent(x)
+        emb = self.mlp_head(x)
         # if label is not None:
         #     x = self.loss(emb, label)
         #     return x, emb

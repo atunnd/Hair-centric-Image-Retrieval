@@ -13,12 +13,12 @@ def parse_args():
     parser.add_argument('--ckpt_path', type=str, default="weights/face_encoder/Backbone_VIT_Epoch_2_Batch_20000_Time_2021-01-12-16-48_checkpoint.pth",
                         help='Path to model checkpoint')
     parser.add_argument('--model_name', type=str, default="VIT",
-                        choices=["VIT, VITs"],
+                        choices=["VIT", "VITs"],
                         help='Model architecture to use')
     
     # Data configuration
     parser.add_argument('--data_path', type=str, 
-                        default="/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/HairLearning/data/train",
+                        default="/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/faceLearning/data/train",
                         help='Path to training data directory')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for inference')
@@ -91,14 +91,14 @@ def extract_embeddings(face_encoder, args):
     return embeddings, paths
 
 
-def load_embeddings(hair_encoder, args):
+def load_embeddings(face_encoder, args):
     """Load existing embeddings"""
     print("Loading existing embeddings...")
-    embeddings, paths = hair_encoder.load_embeddings(args.embed_save_dir)
+    embeddings, paths = face_encoder.load_embeddings(args.embed_save_dir)
     return embeddings, paths
 
 
-def single_query_retrieval(hair_encoder, embeddings, paths, args):
+def single_query_retrieval(face_encoder, embeddings, paths, args):
     """Perform single query retrieval"""
     print("\n" + "=" * 60)
     print("SINGLE QUERY RETRIEVAL")
@@ -113,10 +113,10 @@ def single_query_retrieval(hair_encoder, embeddings, paths, args):
     
     # Encode query image
     print(f"Encoding query image: {query_img_path}")
-    query_embedding = hair_encoder.encode_single_image(query_img_path)
+    query_embedding = face_encoder.encode_single_image(query_img_path)
     
     # Retrieve similar images
-    results = hair_encoder.retrieve_similar_images(query_embedding, embeddings, paths, top_k=args.top_k)
+    results = face_encoder.retrieve_similar_images(query_embedding, embeddings, paths, top_k=args.top_k)
     
     # Print results
     print(f"\nTop {args.top_k} similar images to: {os.path.basename(query_img_path)}")
@@ -138,7 +138,7 @@ def visualize_retrieval(face_encoder, embeddings, paths, args):
     
     # Generate visualizations
     visualizer.visualize_multiple_queries(
-        hair_encoder=face_encoder,
+        face_encoder=face_encoder,
         embeddings=embeddings,
         paths=paths,
         num_queries=args.num_queries,
@@ -155,35 +155,35 @@ def main():
     # Print configuration
     print_config(args)
     
-    # Initialize HairEncoder
+    # Initialize faceEncoder
     print("Initializing FaceEncoder...")
-    hair_encoder = FaceEncoder(
+    face_encoder = FaceEncoder(
         ckpt_path=args.ckpt_path,
         model_name=args.model_name,
         device=args.device
     )
     
     # Handle embedding extraction/loading
-    should_extract = not args.retrieve_only and (args.force_extract or not hair_encoder.check_embeddings_exist(args.embed_save_dir))
+    should_extract = not args.retrieve_only and (args.force_extract or not face_encoder.check_embeddings_exist(args.embed_save_dir))
     
     if should_extract:
         if args.force_extract:
             print("Force extraction enabled.")
         else:
             print("Embeddings not found.")
-        embeddings, paths = extract_embeddings(hair_encoder, args)
+        embeddings, paths = extract_embeddings(face_encoder, args)
     else:
         if not args.extract_only:
-            embeddings, paths = load_embeddings(hair_encoder, args)
+            embeddings, paths = load_embeddings(face_encoder, args)
     
     # Perform retrieval if not extract_only
     if not args.extract_only:
         if args.save_visualization:
             # Generate visualizations for multiple random queries
-            visualize_retrieval(hair_encoder, embeddings, paths, args)
+            visualize_retrieval(face_encoder, embeddings, paths, args)
         else:
             # Single query retrieval
-            single_query_retrieval(hair_encoder, embeddings, paths, args)
+            single_query_retrieval(face_encoder, embeddings, paths, args)
     
     print("\n" + "=" * 60)
     print("INFERENCE COMPLETED")
