@@ -236,7 +236,7 @@ class FaceRetrievalVisualizer:
         self.vis_save_dir = vis_save_dir
         os.makedirs(vis_save_dir, exist_ok=True)
     
-    def load_image_for_vis(self, image_path, target_size=(224, 224)):
+    def load_image_for_vis(self, image_path, target_size=(112, 112)):
         """Load image for visualization without normalization"""
         # display_path = full_face_dir + image_path.split("/")[-1].replace("_face.png", ".jpg")
         display_path = image_path

@@ -393,9 +393,9 @@ class ViTs_face(nn.Module):
 
         x = self.to_latent(x)
         emb = self.mlp_head(x)
-        # if label is not None:
-        #     x = self.loss(emb, label)
-        #     return x, emb
-        # else:
-        #     return emb
+        if label is not None:
+            x = self.loss(emb, label)
+            return x, emb
+        else:
+            return emb
         return x
