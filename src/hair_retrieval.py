@@ -10,7 +10,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Hair Image Retrieval Inference')
     
     # Model configuration
-    parser.add_argument('--ckpt_path', type=str, default="checkpoint/checkpoint-199.pth",
+    parser.add_argument('--ckpt_path', type=str, default="/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/HairLearning/baselines/Siamese-Image-Modeling/checkpoint/checkpoint-199.pth",
                         help='Path to model checkpoint')
     parser.add_argument('--model_name', type=str, default="vit_base_patch16",
                         choices=["vit_base_patch16", "sim_vit_base_patch16"],

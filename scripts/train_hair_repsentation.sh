@@ -1,0 +1,13 @@
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch --nproc_per_node=1 main_pretrain.py \
+  --data_path "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/HairLearning/data" \
+  --output_dir "checkpoint" \
+  --model "sim_vit_base_patch16" \
+  --batch_size 64 \
+  --epochs 500 \
+  --loss_type "sim" \
+  --input_size 224 \
+  --mask_ratio 0.75 \
+  --blr 1e-3 \
+  --weight_decay 0.05 \
+  --num_workers 12 \
+  --with_blockwise_mask

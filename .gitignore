@@ -10,6 +10,10 @@ __pycache__/
 /save
 /data
 /weights
+/hair_data
+/hair_representation
+/.vscode
+/dataset_pipeline
 
 # Distribution / packaging
 .Python

@@ -14,7 +14,7 @@ import matplotlib.patches as patches
 from matplotlib.patches import Rectangle
 
 
-# full_face_dir = "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/HairstyleRetrieval/data/FFHQ_celebA/"
+full_face_dir = "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/HairstyleRetrieval/data/FFHQ_celebA/"
 
 
 class HairEncoder:
@@ -221,8 +221,8 @@ class HairRetrievalVisualizer:
     
     def load_image_for_vis(self, image_path, target_size=(224, 224)):
         """Load image for visualization without normalization"""
-        # display_path = full_face_dir + image_path.split("/")[-1].replace("_hair.png", ".jpg")
-        display_path = image_path
+        display_path = full_face_dir + image_path.split("/")[-1].replace("_hair.png", ".jpg")
+        # display_path = image_path
         image = Image.open(display_path).convert('RGB')
         image = image.resize(target_size, Image.Resampling.LANCZOS)
         return np.array(image)
