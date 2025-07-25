@@ -6,65 +6,95 @@
 {% if not queries %}
     <div class="text-center p-4 text-red-500">No queries available. Check JSON data.</div>
 {% else %}
-    <form method="post" class="mb-4 flex flex-col sm:flex-row gap-4 items-center">
-        <div class="flex gap-2">
-            <label class="mr-2">Query:</label>
-            <select name="query_id" class="p-2 border rounded">
-                {% for query in queries | sort %}
-                    <option value="{{ query }}" {% if query == selected_query %}selected{% endif %}>{{ query }}</option>
-                {% endfor %}
-            </select>
+    <form method="post" class="mb-4 space-y-4">
+        <!-- Benchmark Selection -->
+        <div class="flex flex-wrap gap-4 items-center">
+            <div class="flex gap-2">
+                <label class="mr-2 font-semibold">Benchmark:</label>
+                <select name="benchmark" class="p-2 border rounded">
+                    {% for bench_key, bench_config in benchmarks.items() %}
+                        <option value="{{ bench_key }}" {% if bench_key == selected_benchmark %}selected{% endif %}>{{ bench_config.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="flex gap-2">
+                <label class="mr-2 font-semibold">Query:</label>
+                <select name="query_id" class="p-2 border rounded">
+                    {% for query in queries | sort %}
+                        <option value="{{ query }}" {% if query == selected_query %}selected{% endif %}>{{ query }}</option>
+                    {% endfor %}
+                </select>
+            </div>
         </div>
         
-        <div>
-            <label class="mr-2">Models:</label>
-            {% for model in models %}
+        <!-- Model and Version Selection -->
+        <div class="space-y-2">
+            <label class="font-semibold">Models & Versions:</label>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {% for i in range(2) %}
+                    <div class="border rounded p-3">
+                        <h4 class="font-medium mb-2">Model {{ i + 1 }}</h4>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="block text-sm">Model:</label>
+                                <select name="models" class="w-full p-2 border rounded">
+                                    {% for model in models %}
+                                        <option value="{{ model }}" {% if i < selected_models|length and model == selected_models[i] %}selected{% endif %}>{{ model }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm">Version:</label>
+                                <select name="model_versions" class="w-full p-2 border rounded">
+                                    {% for version in model_versions %}
+                                        <option value="{{ version }}" {% if i < selected_model_versions|length and version == selected_model_versions[i] %}selected{% endif %}>{{ version }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- Options -->
+        <div class="flex flex-wrap gap-4 items-center">
+            <div>
+                <label class="mr-2 font-semibold">View Mode:</label>
                 <label class="mr-4">
                     <input
-                        type="checkbox"
-                        name="models"
-                        value="{{ model }}"
-                        {% if model in selected_models %}checked{% endif %}
+                        type="radio"
+                        name="view_mode"
+                        value="full"
+                        {% if view_mode == 'full' %}checked{% endif %}
                         class="mr-1"
                     />
-                    {{ model }}
+                    Full Image
                 </label>
-            {% endfor %}
-        </div>
-        <div>
-            <label class="mr-2">View Mode:</label>
-            <label class="mr-4">
-                <input
-                    type="radio"
-                    name="view_mode"
-                    value="full"
-                    {% if view_mode == 'full' %}checked{% endif %}
-                    class="mr-1"
-                />
-                Full Image
-            </label>
+                <label>
+                    <input
+                        type="radio"
+                        name="view_mode"
+                        value="hair"
+                        {% if view_mode == 'hair' %}checked{% endif %}
+                        class="mr-1"
+                    />
+                    Hair Only
+                </label>
+            </div>
             <label>
                 <input
-                    type="radio"
-                    name="view_mode"
-                    value="hair"
-                    {% if view_mode == 'hair' %}checked{% endif %}
+                    type="checkbox"
+                    name="show_only_correct"
+                    value="true"
+                    {% if show_only_correct %}checked{% endif %}
                     class="mr-1"
                 />
-                Hair Only
+                Show Only Correct
             </label>
+            <button type="submit" class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Update</button>
         </div>
-        <label>
-            <input
-                type="checkbox"
-                name="show_only_correct"
-                value="true"
-                {% if show_only_correct %}checked{% endif %}
-                class="mr-1"
-            />
-            Show Only Correct
-        </label>
-        <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded">Update</button>
     </form>
 
     <div class="mb-4">
@@ -72,39 +102,52 @@
         <div class="flex flex-nowrap gap-4 overflow-x-auto">
             <div class="flex flex-col items-center">
                 <p class="text-sm">Query</p>
-                <img
-                    src="{% if view_mode == 'hair' %}/hair_images/{{ selected_query }}_hair.png{% else %}/face_images/{{ selected_query }}.jpg{% endif %}"
-                    alt="Query {{ selected_query }}"
-                    class="w-20 h-20 object-cover rounded"
-                />
+                {% if selected_benchmark == "korean" %}
+                    <img
+                        src="/korean_images/{{ selected_query }}_query.jpg"
+                        alt="Query {{ selected_query }}"
+                        class="w-20 h-20 object-cover rounded"
+                    />
+                {% else %}
+                    <img
+                        src="{% if view_mode == 'hair' %}/hair_images/{{ selected_query }}_hair.png{% else %}/face_images/{{ selected_query }}.jpg{% endif %}"
+                        alt="Query {{ selected_query }}"
+                        class="w-20 h-20 object-cover rounded"
+                    />
+                {% endif %}
             </div>
-            {% if display_models and results[display_models[0]] and results[display_models[0]].ground_truth %}
-                {% for gt in results[display_models[0]].ground_truth %}
-                    <div class="flex flex-col items-center">
-                        <p class="text-sm">Ground Truth</p>
-                        <img
-                            src="{{ gt }}"
-                            alt="Ground Truth {{ gt }}"
-                            class="w-20 h-20 object-cover rounded border-2 border-blue-500"
-                            title="{{ gt }}"
-                        />
-                    </div>
-                {% endfor %}
-            {% else %}
-                <div class="text-center p-4 text-red-500">No ground truth available for query {{ selected_query }}</div>
+            {% if display_models and results %}
+                {% set first_result_key = results.keys() | list | first %}
+                {% if first_result_key and results[first_result_key] and results[first_result_key].ground_truth %}
+                    {% for gt in results[first_result_key].ground_truth %}
+                        <div class="flex flex-col items-center">
+                            <p class="text-sm">Ground Truth</p>
+                            <img
+                                src="{{ gt }}"
+                                alt="Ground Truth {{ gt }}"
+                                class="w-20 h-20 object-cover rounded border-2 border-blue-500"
+                                title="{{ gt }}"
+                            />
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center p-4 text-red-500">No ground truth available for query {{ selected_query }}</div>
+                {% endif %}
             {% endif %}
         </div>
     </div>
 
     <hr class="my-4" />
 
-    {% if display_models %}
+    {% if results %}
         <div class="flex flex-row gap-4">
-            {% for model in display_models %}
-                {% set res = results[model] %}
+            {% for result_key, res in results.items() %}
                 {% if res and res.top100 %}
                     <div class="w-1/2">
-                        <h3 class="text-xl font-semibold mb-2">Top-100 from Model: {{ model }}</h3>
+                        <h3 class="text-xl font-semibold mb-2">
+                            Model: {{ res.model_name | title }} 
+                            <span class="text-lg text-gray-600">({{ res.version }})</span>
+                        </h3>
                         <div class="max-h-[600px] overflow-y-auto border rounded p-2">
                             <div class="flex flex-wrap gap-4">
                             {% for img in res.top100 %}
@@ -136,32 +179,40 @@
                         </div>
                     </div>
                 {% else %}
-                    <div class="w-1/2 text-center p-4 text-red-500">No results available for model {{ model }}</div>
+                    <div class="w-1/2 text-center p-4 text-red-500">No results available for {{ result_key }}</div>
                 {% endif %}
             {% endfor %}
         </div>
     {% else %}
-        <div class="text-center p-4 text-red-500">No models selected. Please select at least one model.</div>
+        <div class="text-center p-4 text-red-500">No model results to display</div>
     {% endif %}
 {% endif %}
 
 <div class="mt-8 flex justify-center gap-8">
   <form method="post">
+    <input type="hidden" name="benchmark" value="{{ selected_benchmark }}">
     <input type="hidden" name="query_index" value="{{ query_index - 1 if query_index > 0 else queries | length - 1 }}">
     <input type="hidden" name="view_mode" value="{{ view_mode }}">
     <input type="hidden" name="show_only_correct" value="{{ 'true' if show_only_correct else '' }}">
     {% for model in selected_models %}
       <input type="hidden" name="models" value="{{ model }}">
     {% endfor %}
+    {% for version in selected_model_versions %}
+      <input type="hidden" name="model_versions" value="{{ version }}">
+    {% endfor %}
     <button type="submit" class="px-4 py-2 bg-gray-200 rounded">← Previous</button>
   </form>
 
   <form method="post">
+    <input type="hidden" name="benchmark" value="{{ selected_benchmark }}">
     <input type="hidden" name="query_index" value="{{ query_index + 1 if query_index < queries | length - 1 else 0 }}">
     <input type="hidden" name="view_mode" value="{{ view_mode }}">
     <input type="hidden" name="show_only_correct" value="{{ 'true' if show_only_correct else '' }}">
     {% for model in selected_models %}
       <input type="hidden" name="models" value="{{ model }}">
+    {% endfor %}
+    {% for version in selected_model_versions %}
+      <input type="hidden" name="model_versions" value="{{ version }}">
     {% endfor %}
     <button type="submit" class="px-4 py-2 bg-gray-200 rounded">Next →</button>
   </form>

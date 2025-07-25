@@ -7,6 +7,8 @@ class ImagePair(BaseModel):
 
 class QueryResult(BaseModel):
     model: str
+    version: str = "top100"
+    benchmark: str = "hairstyle"
     query_id: str
     query_image: str
     query_image_face: str
@@ -20,3 +22,10 @@ class AvailableQueriesResponse(BaseModel):
 
 class AvailableModelsResponse(BaseModel):
     models: List[str]
+
+class BenchmarkInfo(BaseModel):
+    key: str
+    name: str
+
+class AvailableBenchmarksResponse(BaseModel):
+    benchmarks: List[BenchmarkInfo]
