@@ -14,6 +14,9 @@ tqdm>=4.62.0
 # Visualization (for qualitative test)
 matplotlib>=3.5.0
 
+# Quantitative evaluation
+faiss-cpu>=1.7.0  # or faiss-gpu for GPU acceleration
+
 # Configuration and logging
 PyYAML>=5.4.0
 tensorboard>=2.7.0
