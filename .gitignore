@@ -14,6 +14,8 @@ __pycache__/
 /hair_representation
 /.vscode
 /dataset_pipeline
+/benchmark
+/benchmark_processing
 
 # Model files
 *.pt
