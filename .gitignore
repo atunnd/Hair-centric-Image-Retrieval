@@ -20,6 +20,8 @@ __pycache__/
 # Model files
 *.pt
 *.pth
+*.index
+*.pkl
 
 # Image files
 *.png

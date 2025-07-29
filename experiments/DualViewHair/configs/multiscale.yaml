@@ -1,0 +1,49 @@
+# Enhanced Multi-Scale DualViewHair Configuration
+# Multi-scale feature extraction with spatial attention and NT-Xent loss
+
+# Model Configuration
+model:
+  encoder_type: "multiscale"        # Multi-scale encoder with attention
+  embedding_dim: 256                # Feature embedding dimension
+  projection_dim: 128               # Contrastive projection dimension
+  momentum: 0.999                   # Teacher momentum update rate
+  pretrained: true                  # Use ImageNet pretrained backbone
+  use_cross_alignment: true         # Enable cross-view alignment
+  use_attention: true               # Use spatial attention modules
+
+# Loss Configuration
+loss:
+  loss_type: "hybrid"               # Hybrid loss combining contrastive + alignment
+  temperature: 0.07                 # Lower temperature for better hard negatives
+  contrastive_loss: "ntxent"        # Base contrastive loss (ntxent or asymmetric_ntxent)
+  alignment_weight: 0.1             # Cross-view alignment loss weight
+
+# Data Configuration
+data:
+  data_root: "./data"               # Root directory containing hair_regions and full_images
+  image_size: 224                   # Input image size (square)
+  normalize_mean: [0.485, 0.456, 0.406]  # ImageNet normalization
+  normalize_std: [0.229, 0.224, 0.225]
+
+# Training Configuration
+training:
+  num_epochs: 80                    # More epochs for complex model
+  batch_size: 24                    # Smaller batch for memory constraints
+  learning_rate: 0.0005             # Lower learning rate for stable training
+  weight_decay: 0.0001              # L2 regularization
+  optimizer: "adamw"                # AdamW for better generalization
+  scheduler: "warmup_cosine"        # Warmup + cosine annealing
+  warmup_epochs: 10                 # Longer warmup for complex model
+  grad_clip_norm: 1.0               # Gradient clipping norm
+  
+  # Logging and saving
+  log_interval: 50                  # Log more frequently
+  save_interval: 10                 # Save checkpoint every N epochs
+  output_dir: "./outputs/multiscale"  # Output directory
+
+# Evaluation Configuration
+evaluation:
+  batch_size: 32                    # Smaller batch for memory
+  top_k: [1, 5, 10, 20, 50]        # Extended top-K values
+  metrics: ["map", "recall", "ndcg"]  # Additional metrics
+  use_teacher: true                 # Use teacher encoder for evaluation
