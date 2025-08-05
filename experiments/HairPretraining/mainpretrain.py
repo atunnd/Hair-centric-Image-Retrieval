@@ -49,6 +49,7 @@ def parse_args():
     parser.add_argument('--warm_up_epochs', default=0, type=int, help='Number of warmup epochs for negative sampling')
     parser.add_argument('--dino_checkpoint', type=str, help="Path to pretrained dino checkpoint")
     parser.add_argument('--centroid_momentum', type=float, default=0.9)
+    parser.add_argument('--neg_minibatch', type=bool, default=False)
 
     return parser.parse_args()
 

@@ -68,9 +68,9 @@ class KMeans:
         return torch.sum(x * y, dim=-1)
 
 
-class NegSampler(torch.nn.Module):
+class NegSamplerCentroid(torch.nn.Module):
     def __init__(self, k=5, momentum=0.9):
-        super(NegSampler, self).__init__()
+        super(NegSamplerCentroid, self).__init__()
         self.k = k
         self.momentum = momentum
         self.kmeans = KMeans(k=k, momentum=momentum)
