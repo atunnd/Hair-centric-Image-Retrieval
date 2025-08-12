@@ -12,8 +12,7 @@ from utils.utils import get_optimizer, linear_decay_alpha
 from utils.transform import positive_transform 
 
 from .backbone import DINO
-from .neg_sampling_centroid import NegSamplerCentroid
-from .neg_sampling_minibatch import NegSamplerMiniBatch
+from .neg_sampling import NegSamplerMiniBatch, NegSamplerClasses, NegSamplerRandomly
 import timm
 
 
@@ -46,39 +45,30 @@ class Trainer:
         if args.neg_sample:
             # neg samling
             self.neg_sampling = True
+            self.negative_centroid = args.negative_centroid
             self.neg_minibatch = args.neg_minibatch
             self.warm_up_epochs = args.warm_up_epochs
             self.centroid_momentum = args.centroid_momentum
-            os.makedirs(os.path.join(self.save_path, f"{self.mode}_neg_sample_minibatch_normalized_loss"), exist_ok=True)
-            #backbone = torch.hub.load('facebookresearch/dino:main', 'dino_vits16', pretrained=True)
-            #input_dim = backbone.embed_dim    
-            #self.dino = DINO(backbone, input_dim)
+            self.sampling_frequency = args.sampling_frequency
 
-            # Load pretrained DINO model (e.g., dino_vitb16)
-            self.dino = timm.create_model("vit_base_patch16_224_dino", pretrained=True)
+            if self.negative_centroid:
+                self.save_path = os.path.join(self.save_path, f"{self.mode}_neg_sample_centroid")
+            else:
+                self.save_path = os.path.join(self.save_path, f"{self.mode}_neg_sample")
 
-            # Đặt chế độ eval nếu chỉ dùng để extract features hoặc inference
-            self.dino.eval()
-
-            self.dino = self.dino.to(self.device)
-
-            # set losses for negative sampling
+            # set sampling method and loss
             if self.neg_loss == "simclr":
+                self.neg_sampler = NegSamplerMiniBatch(k=10, dim=128, momentum=self.centroid_momentum, negative_centroid=self.negative_centroid, save_path=self.save_path)
                 self.criterion = NTXentLoss()
             elif self.neg_loss == "supcon":
+                self.neg_sampler = NegSamplerClasses()
                 self.criterion = SupConLoss()
-
-            # init negative sampling
-            if self.neg_minibatch:
-                self.neg_sampler = NegSamplerMiniBatch(k=10)
-            else:
-                self.neg_sampler = NegSamplerCentroid(k=10)
-
+            
             # init triplet loss
             self.triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
         else:
-            if not args.test:
-                os.makedirs(os.path.join(self.save_path, self.mode), exist_ok=True)
+            self.save_path = os.path.join(self.save_path, self.mode)
+        os.makedirs(self.save_path, exist_ok=True)
     
     def train_one_epoch_simclr(self, epoch=0, alpha=0):
         self.model.train()
@@ -114,7 +104,7 @@ class Trainer:
     def train_one_epoch_simclr_supcon(self, epoch=0, alpha=0):
         self.model.train()
         running_loss = 0.0
-        for batch in tqdm(self.train_loader, desc="Training"):
+        for batch in tqdm(self.train_loader, desc="Training with simclr on supcon"):
             images, labels = batch[0], batch[1]
             images = [img.to(self.device) for img in images]
             labels = labels.to(self.device)
@@ -134,16 +124,10 @@ class Trainer:
     def train_one_epoch_simclr_neg_supervised(self, epoch=0, alpha=0):
         self.model.train()
         running_loss =0.0
-        for batch in tqdm(self.train_loader, desc="Training"):
+        for batch in tqdm(self.train_loader, desc="Training with supervised negative sampling"):
             images, labels = batch[0], batch[1].to(self.device)
             images = [img.to(self.device) for img in images]
 
-    @staticmethod
-    def max_loss_eval(current_loss, max_loss):
-        if current_loss > max_loss:
-            return current_loss.detach()
-        else:
-            return max_loss
     
     def train_one_epoch_simclr_neg_sample(self, epoch=0, alpha=0, embeddings=0, init_centroid=False, global_centroids=0, ema_loss1 = 0.0, ema_loss2=0.0, beta_loss=0.99, neg_batch=None):
         self.model.train()
@@ -154,52 +138,41 @@ class Trainer:
             images, labels = batch[0], batch[1].to(self.device)
             images = [img.to(self.device) for img in images]
             trip_loss = 0.0
+
+            ### STAGE 1: Randomly negative sampling
+            neg_batch[batch_id] = positive_transform(NegSamplerRandomly(images[0]))
+
             if self.warm_up_epochs == epoch + 1:
                 if batch_id == 0:
                     print("create embeddings")
                 pos_batch = positive_transform(images[1])
                 with torch.no_grad():
                     embeddings[batch_id] = self.dino(pos_batch)
+
+            ### STAGE 2: Hard negative mining
             if self.warm_up_epochs <= epoch:
                 # generate positive sample
-                pos_batch = positive_transform(images[1])
-                if init_centroid:
+                if (epoch + 1) % self.sampling_frequency == 0:
+                    neg_batch[batch_id] = self.neg_sampler(images[0])
                     if batch_id == 0:
                         print("Init centroids")
-                    current_centroids, current_neg_batch = self.neg_sampler.forward(embeddings[batch_id], images[0], first_batch=True)
-                    neg_batch[batch_id] = current_neg_batch
-                #else:
-                #    current_centroids, neg_batch = self.neg_sampler.forward(embeddings[batch_id], images[0], prev_centroids=global_centroids[batch_id])
-                
-                #global_centroids[batch_id] = current_centroids
-                
-                trip_loss = self.triplet_loss(images[0], pos_batch, neg_batch[batch_id])
+                    neg_batch[batch_id] = self.neg_sampler.forward(ema_embeddings, images[0], first_batch=True)
+
+            pos_batch = positive_transform(images[1])
+            trip_loss = self.triplet_loss(images[0], pos_batch, neg_batch[batch_id])
+            running_loss1 += trip_loss.item()
                 
             
-            # simclr running
+            # Main encoder running
             x0, x1 = images
             x0, x1 = x0.to(self.device), x1.to(self.device)
             z0 = self.model(x0)
             z1 = self.model(x1)
             nt_xent_loss = self.criterion(z0, z1)
-            
-
-            if ema_loss2==0.0:
-                ema_loss2 = nt_xent_loss.item()
-            ema_loss2 = beta_loss * ema_loss2 + (1 - beta_loss) * nt_xent_loss.item()
-            nt_xent_loss /= (ema_loss2 + 1e-8)
             running_loss2 += nt_xent_loss.item()
-
-
-            if self.warm_up_epochs <= epoch:
-                # initial ema loss
-                if ema_loss1 == 0.0:
-                    ema_loss1 = trip_loss.item()
-                ema_loss1 = beta_loss * ema_loss1 + (1 - beta_loss) * trip_loss.item()
-                trip_loss /= (ema_loss1 + 1e-8)   
-                running_loss1 += trip_loss.item()          
-            
-            total_loss = (1-alpha)*trip_loss + alpha*nt_xent_loss
+       
+            # Total loss
+            total_loss = nt_xent_loss + alpha*trip_loss
             running_loss += total_loss.detach()
 
             total_loss.backward()
@@ -208,18 +181,6 @@ class Trainer:
 
         return running_loss/len(self.train_loader),running_loss1/len(self.train_loader), running_loss2/len(self.train_loader), global_centroids, embeddings, ema_loss1, ema_loss2, neg_batch
 
-    def validate(self):
-        self.model.eval()
-        correct = total = 0
-        with torch.no_grad():
-            for inputs, targets in tqdm(self.val_loader, desc="Validating"):
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
-                outputs = self.model(inputs)
-                _, predictions = torch.max(outputs, dim=1) 
-                correct += (predictions == targets).sum().item()
-                total += targets.size(0)
-            
-        return correct / total
     
     def train(self):
         if self.mode == "mae":
@@ -256,10 +217,7 @@ class Trainer:
                 train_loss = train_one_epoch(epoch=epoch, alpha=alpha)
                 print(f"Train loss: {train_loss:.4f}")
             if (epoch+1) % 20 == 0:
-                if self.neg_sampling:
-                    output = os.path.join(os.path.join(self.save_path, f"{self.mode}_neg_sample_minibatch_normalized_loss"), f"model_ckpt_{epoch}.pth")
-                else:
-                    output = os.path.join(os.path.join(self.save_path, f"{self.mode}"), f"model_ckpt_{epoch}.pth")
+                output = os.path.join(self.save_path, f"model_ckpt_{epoch}.pth")
                 torch.save(self.model.state_dict(), output)
                 print(f"✅ Model saved to {self.save_path}")
             
