@@ -15,14 +15,10 @@ python mainpretrain.py \
   --beta1 0.9 \
   --beta2 0.999 \
   --temp 0.7 \
-  --mode simclr \
-  --model resnet18 \
+  --mode mae \
+  --model vit_b_16 \
   --seed 42 \
   --num_workers 16 \
-  --neg_sample True \
-  --warm_up_epochs 20 \
-  --neg_loss simclr \
-  --sampling_frequency 20 \
 
 
     

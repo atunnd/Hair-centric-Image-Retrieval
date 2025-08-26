@@ -18,20 +18,116 @@ from lightly.models.modules import MAEDecoderTIMM, MaskedVisionTransformerTIMM
 from lightly.transforms import MAETransform
 from lightly.models.utils import deactivate_requires_grad, update_momentum
 
+import torch.nn as nn
 
-class SimCLR(nn.Module):
-    def __init__(self, backbone):
+import torch
+import torch.nn as nn
+import torchvision.models as models
+
+# Giả định SimCLRProjectionHead (thay bằng lightly nếu dùng)
+# class SimCLRProjectionHead(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, output_dim):
+#         super().__init__()
+#         self.fc1 = nn.Linear(input_dim, hidden_dim)
+#         self.relu = nn.ReLU()
+#         self.fc2 = nn.Linear(hidden_dim, output_dim)
+
+#     def forward(self, x):
+#         x = self.relu(self.fc1(x))
+#         return self.fc2(x)
+
+class AttentionPooling(nn.Module):
+    def __init__(self, dim):
         super().__init__()
-        self.backbone = backbone
-        self.projection_head = SimCLRProjectionHead(512, 512, 128)
+        self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=8, batch_first=True)
 
-        #self.backbone_momentum = copy.deepcopy(self.backbone)
-        #self.projection_head_momentum = copy.deepcopy(self.projection_head)
+    def forward(self, x):  # x: [batch, seq_len, dim]
+        # Use CLS as query, patches as key/value
+        query = x[:, :1, :]  # CLS as query
+        key_value = x[:, 1:, :]  # Patches
+        attn_output, _ = self.attn(query, key_value, key_value)
+        return attn_output.squeeze(1)  # [batch, dim]
+
+# Custom ViT backbone to handle full feature extraction (exclude heads)
+class ViTBackbone(nn.Module):
+    def __init__(self, vit_model):
+        super().__init__()
+        self.conv_proj = vit_model.conv_proj
+        self.class_token = vit_model.class_token
+        self.pos_embed = vit_model.encoder.pos_embedding
+        self.dropout = vit_model.dropout
+        self.encoder = vit_model.encoder  # Includes layers and final LN
 
     def forward(self, x):
+        # Patch embedding
+        x = self.conv_proj(x)
+        x = x.flatten(2).transpose(1, 2)  # [batch, num_patches, embed_dim]
+        
+        # Add CLS token
+        cls_token = self.class_token.expand(x.shape[0], -1, -1)
+        x = torch.cat((cls_token, x), dim=1)
+        
+        # Add positional embedding
+        x = x + self.pos_embed
+        
+        # Dropout and encoder
+        #x = self.dropout(x)
+        x = self.encoder(x)  # [batch, seq_len, embed_dim]
+        
+        return x
+
+class SimCLR(nn.Module):
+    def __init__(self, backbone, model=None, attention_pooling=False):
+        super().__init__()
+        self.model = model
+        self.attn_pooling = attention_pooling
+        
+        # Handle backbone: For ViT, wrap it
+        if "vit" in str(model):
+            vit = models.vit_b_16()  # Load full ViT if backbone is not already wrapped
+            self.backbone = ViTBackbone(vit)
+            proj_input_dim = 768  # For vit_b_16
+            output_dim = 512
+        else:
+            self.backbone = backbone  # Assume ResNet-like, already Sequential[:-1]
+            if model == "resnet18":
+                proj_input_dim = 512
+                output_dim=128
+            elif model == "resnet50":
+                proj_input_dim = 2048
+                output_dim=1024
+            else:
+                raise ValueError("Unsupported model")
+        
+        self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
+        
+        if self.attn_pooling and "vit" in str(model):
+            self.pooled = AttentionPooling(proj_input_dim)
+        elif self.attn_pooling:
+            print("Warning: Attention pooling only for ViT")
+
+    def forward(self, x):
+        x = self.backbone(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
+        
+        if "vit" in str(self.model):
+            if self.attn_pooling:
+                cls_token = x[:, 0, :]
+                patch_token = self.pooled(x)  # [batch, dim]
+                z = self.projection_head(cls_token)
+            else:
+                cls_token = x[:, 0, :]  # CLS token [batch, dim]
+                patch_token = x[:, 1:, :]
+                z = self.projection_head(cls_token)
+            return z, patch_token
+            
+        else:
+            x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
+            z = self.projection_head(x)
+        return z, None
+    
+    def extract_features(self, x):
         x = self.backbone(x).flatten(start_dim=1)
-        z = self.projection_head(x)
-        return z
+        return x
     
 
 class BasicBlock(nn.Module):
@@ -308,4 +404,4 @@ class MAE(nn.Module):
         patches = utils.patchify(images, self.patch_size)
         # must adjust idx_mask for missing class token
         target = utils.get_at_index(patches, idx_mask - 1)
-        return x_pred, target, x_encoded
+        return x_pred, target

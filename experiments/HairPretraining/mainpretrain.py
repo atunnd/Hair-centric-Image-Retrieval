@@ -42,7 +42,7 @@ def parse_args():
 
     # Model option
     parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon'])
-    parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50'])
+    parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50', "vit_b_16"])
 
     # Optional config
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
@@ -56,6 +56,9 @@ def parse_args():
     parser.add_argument('--sampling_frequency', type=int, default=0, help="Frequency to sample hard negative")
     # supcon setting
     parser.add_argument('--classes', default=128, type=int, help="Classes for sup con")
+
+    # ViT settings
+    parser.add_argument('--atn_pooling', default=False, type=bool, help='attention pooling for constrative learning')
     
 
     return parser.parse_args()
@@ -82,8 +85,8 @@ def main(args):
         train_transform = SimCLRTransform(input_size=224)
         test_transform = SimCLRTransform(input_size=224)   
     elif args.mode == "mae":
-            train_transform = MAETransform(input_size=224)
-            test_transform = MAETransform(input_size=224)
+        train_transform = MAETransform(input_size=224)
+        test_transform = MAETransform(input_size=224)
 
     if args.mode == "simclr_supcon":
         train_dataset = CustomDataset(args.train_annotation, args.img_dir, TwoCropTransform(train_transform))
@@ -100,25 +103,34 @@ def main(args):
         model = SupConResNet(name=args.model, feat_dim=args.classes)
     elif args.mode == "simclr":
         if args.model == "resnet18":
-            resnet = torchvision.models.resnet18()
+            backbone = torchvision.models.resnet18()
+            output_dim=128
+            backbone = nn.Sequential(*list(backbone.children())[:-1])
         elif args.model == "resnet50":
-            resnet = torchvision.models.resnet50()
-        backbone = nn.Sequential(*list(resnet.children())[:-1])
-        model = SimCLR(backbone)
+            backbone = torchvision.models.resnet50()
+            output_dim=1024
+            backbone = nn.Sequential(*list(backbone.children())[:-1])
+        elif args.model == 'vit_b_16':
+            #backbone = torchvision.models.vit_b_16()
+            backbone=None
+            output_dim= 512
+        #backbone = nn.Sequential(*list(backbone.children())[:-1])
+        model = SimCLR(backbone, args.model, attention_pooling = args.atn_pooling)
     elif args.mode == "mae":
         vit = vit_base_patch32_224()
         model = MAE(vit)
 
     trainer = Trainer(model, train_loader, test_loader, args)
     
-    if args.test:
-        state_dict = torch.load(args.test_model_path, map_location=args.device)
-        model.load_state_dict(state_dict)
-        print(f"✅ Model loaded from {args.test_model_path}")
-        val_acc = trainer.validate()
-        print(f"Test accuracy: {val_acc:.4f}")
-    else:
-        trainer.train()
+    # if args.test:
+    #     state_dict = torch.load(args.test_model_path, map_location=args.device)
+    #     model.load_state_dict(state_dict)
+    #     print(f"✅ Model loaded from {args.test_model_path}")
+    #     val_acc = trainer.validate()
+    #     print(f"Test accuracy: {val_acc:.4f}")
+    # else:
+    #     trainer.train()
+    trainer.train()
 
 if __name__ == "__main__":
     args = parse_args()

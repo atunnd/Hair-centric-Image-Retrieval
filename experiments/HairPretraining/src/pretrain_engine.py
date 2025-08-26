@@ -45,17 +45,17 @@ class Trainer:
         self.neg_sampling = False
         self.neg_loss = args.neg_loss
         self.warm_up_epochs = self.epochs
+        self.mode_model = args.model
 
         if args.neg_sample:
             # neg samling
             self.neg_sampling = True
             self.warm_up_epochs = args.warm_up_epochs
             self.sampling_frequency = args.sampling_frequency
-            self.supervised_negative = args.supervised_negative
 
             self.margin_step=0
 
-            self.save_path = os.path.join(self.save_path, f"{self.mode}_neg_sample_supervised_mse_static")
+            self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_neg_sample_supervised_mse_static_alpha_patch_{args.atn_pooling}")
             print("Training with supervised neg sample")
             
             os.makedirs(self.save_path, exist_ok=True)
@@ -84,7 +84,7 @@ class Trainer:
                 self.negative_batch_idx.append(NegSamplerNN(images, 7, 'cosine'))
 
         else:
-            self.save_path = os.path.join(self.save_path, self.mode)
+            self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
             os.makedirs(self.save_path, exist_ok=True)
     
     def train_one_epoch_simclr(self, epoch=0, alpha=0):
@@ -105,7 +105,7 @@ class Trainer:
             self.optimizer.zero_grad() 
         return running_loss / len(self.train_loader)
     
-    def train_one_epoch_mae(self, epoch=0):
+    def train_one_epoch_mae(self, epoch=0, alpha=0):
         self.model.train()
         running_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Training"):
@@ -147,7 +147,7 @@ class Trainer:
             images = [img.to(self.device) for img in images]
 
     
-    def train_one_epoch_simclr_neg_sample(self, epoch=0, alpha=0, neg_batch_idx=None, momentum_val=0, trip_margin=0):
+    def train_one_epoch_simclr_neg_sample(self, epoch=0, alpha=0, neg_batch_idx=None, momentum_val=0, scaler=None):
         self.model.train()
         running_loss = 0.0
         running_loss1 = 0.0
@@ -192,19 +192,26 @@ class Trainer:
                 anchor_batch_prediction, anchor_batch_target, anchor_batch_z = self.model(images0)
 
             elif self.neg_loss == "simclr":
-                neg_batch = self.model(negative_samples)
-                pos_samples = positive_transform(images1)
-                pos_batch = self.model(pos_samples)
-                anchor_batch = self.model(images0)
+                with torch.cuda.amp.autocast():
+                    neg_batch, neg_batch_patch = self.model(negative_samples)
+                    pos_samples = positive_transform(images1)
+                    pos_batch, pos_batch_patch = self.model(pos_samples)
+                    anchor_batch, anchor_batch_patch = self.model(images0)
 
-                masked_pos_samples= self.positive_masking_transform(pos_samples)
-                masked_pos_batch = self.model(masked_pos_samples).detach()
+                    masked_pos_samples= self.positive_masking_transform(pos_samples)
+                    masked_pos_batch, masked_pos_batch_patch = self.model(masked_pos_samples)
+                    masked_pos_batch = masked_pos_batch.detach()
+                    masked_pos_batch_patch = masked_pos_batch_patch.detach()
 
             if self.neg_loss == "simclr":
                 neg_batch = F.normalize(neg_batch, p=2, dim=1)
                 pos_batch = F.normalize(pos_batch, p=2, dim=1)
                 anchor_batch = F.normalize(anchor_batch, p=2, dim=1)
                 masked_pos_batch = F.normalize(masked_pos_batch, p=2, dim=1)
+                if neg_batch_patch is not None:
+                    neg_batch_patch = F.normalize(neg_batch_patch, p=2, dim=1)
+                    pos_batch_patch = F.normalize(pos_batch_patch, p=2, dim=1)
+                    anchor_batch_patch = F.normalize(anchor_batch_patch, p=2, dim=1)
             elif self.neg_loss == "mae":
                 batch_size = neg_batch_z.shape[0]
                 neg_batch = F.normalize(neg_batch_z.view(batch_size, -1), p=2, dim=1)
@@ -226,35 +233,47 @@ class Trainer:
                 running_neg_dist += neg_dist.mean().item()
                 running_margin_violations += violations.sum().item()
 
-            
-            if self.warm_up_epochs > epoch + 1:
-                trip_loss = self.triplet_loss_stage1(anchor_batch, pos_batch, neg_batch)
-                beta = 0.2
-            else:
-                trip_loss = self.triplet_loss_stage2(anchor_batch, pos_batch, neg_batch)
-                beta = 0.2
+            with torch.cuda.amp.autocast():
+                if self.warm_up_epochs > epoch + 1:
+                    if neg_batch_patch is None:
+                        trip_loss = self.triplet_loss_stage1(anchor_batch, pos_batch, neg_batch)
+                    else:
+                        trip_loss = self.triplet_loss_stage1(anchor_batch_patch, pos_batch_patch, neg_batch_patch)
+                    beta = 0.2
+                else:
+                    if neg_batch_patch is None:
+                        trip_loss = self.triplet_loss_stage2(anchor_batch, pos_batch, neg_batch)
+                    else:
+                        trip_loss = self.triplet_loss_stage2(anchor_batch_patch, pos_batch_patch, neg_batch_patch)
+                    beta = 0.2
 
-            #trip_loss = triplet_loss(anchor_batch, pos_batch, neg_batch)
-            running_loss1 += trip_loss.item()
-            
-            if self.neg_loss == "simclr":
-                nt_xent_loss = self.criterion(pos_batch, anchor_batch)
-                running_loss2 += nt_xent_loss.item()
-
-                mse_loss = F.mse_loss(pos_batch, masked_pos_batch, reduction='mean')
-                running_loss3 += mse_loss.item()
+                #trip_loss = triplet_loss(anchor_batch, pos_batch, neg_batch)
+                running_loss1 += trip_loss.item()
                 
-                total_loss = nt_xent_loss + alpha*trip_loss + beta * mse_loss
+                if self.neg_loss == "simclr":
+                    nt_xent_loss = self.criterion(pos_batch, anchor_batch)
+                    running_loss2 += nt_xent_loss.item()
 
-            elif self.neg_loss == "mae":
-                mse_loss = self.criterion(anchor_batch_prediction, anchor_batch_target)
-                running_loss2 += mse_loss.item()
-                total_loss = mse_loss + alpha*trip_loss
+                    if neg_batch_patch is None:
+                        mse_loss = F.mse_loss(pos_batch, masked_pos_batch, reduction='mean')
+                    else:
+                        mse_loss = F.mse_loss(pos_batch_patch, masked_pos_batch_patch, reduction="mean")
+                    running_loss3 += mse_loss.item()
+                    
+                    total_loss = nt_xent_loss + alpha*trip_loss + beta * mse_loss
 
-            running_loss += total_loss.detach()
+                elif self.neg_loss == "mae":
+                    mse_loss = self.criterion(anchor_batch_prediction, anchor_batch_target)
+                    running_loss2 += mse_loss.item()
+                    total_loss = mse_loss + alpha*trip_loss
 
-            total_loss.backward()
-            self.optimizer.step()
+                running_loss += total_loss.detach()
+
+            #total_loss.backward()
+            #self.optimizer.step()
+            scaler.scale(total_loss).backward()
+            scaler.step(self.optimizer)
+            scaler.update()
             self.optimizer.zero_grad()
 
         
@@ -271,7 +290,7 @@ class Trainer:
 
         if self.neg_loss == "simclr":
             with open(self.log_file, 'a') as f:
-                f.write(f"Epoch {epoch}: Total Loss = {running_loss/len(self.train_loader):.4f}, NT-Xent Loss = {running_loss2/len(self.train_loader):.4f}, MSE Loss = {running_loss3/len(self.train_loader):.4f}, Triplet Loss = {running_loss1/len(self.train_loader):.4f}, Alpha = {alpha:.4f}, Pos distance: {running_post_dist/len(self.train_loader)}, Neg distance: {running_neg_dist/len(self.train_loader)}, Margin violations: {running_margin_violations/len(self.train_loader)}, Margin: {trip_margin} \n")
+                f.write(f"Epoch {epoch}: Total Loss = {running_loss/len(self.train_loader):.4f}, NT-Xent Loss = {running_loss2/len(self.train_loader):.4f}, MSE Loss = {running_loss3/len(self.train_loader):.4f}, Triplet Loss = {running_loss1/len(self.train_loader):.4f}, Alpha = {alpha:.4f}, Pos distance: {running_post_dist/len(self.train_loader)}, Neg distance: {running_neg_dist/len(self.train_loader)}, Margin violations: {running_margin_violations/len(self.train_loader)}\n")
         elif self.neg_loss == "mae":
             with open(self.log_file, 'a') as f:
                 f.write(f"Epoch {epoch}: Total Loss = {running_loss/len(self.train_loader):.4f}, MAE Loss = {running_loss2/len(self.train_loader):.4f}, Triplet Loss = {running_loss1/len(self.train_loader):.4f}, Alpha = {alpha:.4f}, Pos distance: {running_post_dist/len(self.train_loader)}, Neg distance: {running_neg_dist/len(self.train_loader)}, Margin violations: {running_margin_violations/len(self.train_loader)} \n")
@@ -285,6 +304,9 @@ class Trainer:
             train_one_epoch = self.train_one_epoch_simclr
         elif self.mode == 'simclr_supcon':
             train_one_epoch = self.train_one_epoch_simclr_supcon
+
+        
+        scaler = torch.cuda.amp.GradScaler() 
 
         print(f"Training model {self.mode} with losses {self.criterion}")
         
@@ -309,7 +331,7 @@ class Trainer:
             print(f"Epoch {epoch}/{self.epochs}")
             if self.neg_sampling:
                 momentum_val = cosine_schedule(epoch, self.epochs, 0.996, 1)
-                train_loss, train_trip_loss, train_ntxent_loss, neg_batch = train_one_epoch(epoch=epoch, alpha=alpha, neg_batch_idx=neg_batch_idx, momentum_val=momentum_val, trip_margin=0)
+                train_loss, train_trip_loss, train_ntxent_loss, neg_batch = train_one_epoch(epoch=epoch, alpha=alpha, neg_batch_idx=neg_batch_idx, momentum_val=momentum_val, scaler=scaler)
                 if self.neg_loss == "simclr":
                     print(f"Total train loss: {train_loss:.4f}, Triplet loss: {train_trip_loss}, NT-Xent loss: {train_ntxent_loss},  Alpha: {alpha}")
                 elif self.neg_loss == "mae":

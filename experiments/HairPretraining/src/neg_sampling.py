@@ -146,7 +146,7 @@ def NegSamplerNN(batch: torch.Tensor, k: int, metric: str):
     device = batch.device
     resnet = torchvision.models.resnet18()
     backbone = nn.Sequential(*list(resnet.children())[:-1])
-    model = SimCLR(backbone).to(device)
+    model = SimCLR(backbone, model="resnet18").to(device)
     #model = SimCLR(backbone).to(device)
     checkpoint_path = "/data2/dragonzakura/QuocAnh/Composed-Image-Retrieval/experiments/HairPretraining/output_dir/simclr_60k/cpkt_450.pth"
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
@@ -154,7 +154,7 @@ def NegSamplerNN(batch: torch.Tensor, k: int, metric: str):
 
     # create embeddings
     with torch.no_grad():
-        embeddings = model(batch)
+        embeddings, _ = model(batch)
 
     B, D = embeddings.shape
     

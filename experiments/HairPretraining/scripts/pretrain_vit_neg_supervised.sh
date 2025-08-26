@@ -1,4 +1,5 @@
 #!/bin/bash
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 python mainpretrain.py \
   --epochs 200 \
@@ -16,13 +17,14 @@ python mainpretrain.py \
   --beta2 0.999 \
   --temp 0.7 \
   --mode simclr \
-  --model resnet18 \
+  --model vit_b_16\
   --seed 42 \
   --num_workers 16 \
   --neg_sample True \
   --warm_up_epochs 20 \
   --neg_loss simclr \
   --sampling_frequency 20 \
+  
 
 
     
