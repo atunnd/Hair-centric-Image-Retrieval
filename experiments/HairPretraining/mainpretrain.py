@@ -91,6 +91,9 @@ def main(args):
     elif args.mode == "dino":
         train_transform = DINOTransform()
         test_transform = DINOTransform()
+    elif args.mode == "simMIM":
+        train_transform = MAETransform(input_size=224)
+        test_transform = MAETransform(input_size=224)
 
     if args.mode == "simclr_supcon":
         train_dataset = CustomDataset(args.train_annotation, args.img_dir, TwoCropTransform(train_transform))
@@ -130,16 +133,11 @@ def main(args):
         input_dim = backbone.embed_dim
         model = DINO(backbone, input_dim)
 
+    elif args.mode == "simMIM":
+        vit = torchvision.models.vit_b_32(pretrained=False)
+        model = SimMIM(vit)
+
     trainer = Trainer(model, train_loader, test_loader, args)
-    
-    # if args.test:
-    #     state_dict = torch.load(args.test_model_path, map_location=args.device)
-    #     model.load_state_dict(state_dict)
-    #     print(f"✅ Model loaded from {args.test_model_path}")
-    #     val_acc = trainer.validate()
-    #     print(f"Test accuracy: {val_acc:.4f}")
-    # else:
-    #     trainer.train()
     trainer.train()
 
 if __name__ == "__main__":

@@ -42,6 +42,8 @@ class Trainer:
             self.criterion = SupConLoss()
         elif self.mode == "dino":
             self.criterion = DINOLoss(output_dim=2048,warmup_teacher_temp_epochs=5,)
+        elif self.mode == "simMIM":
+            self.criterion = nn.L1Loss()
 
         self.optimizer = get_optimizer(self.model, self.lr, self.weight_decay, self.beta1, self.beta2)
         self.neg_sampling = False
@@ -162,6 +164,21 @@ class Trainer:
             self.optimizer.zero_grad()
 
         return running_loss / len(self.train_loader)
+
+    def train_one_epoch_simMIM(self, epoch=0, alpha=0):
+        running_loss =0.0
+        for batch in tqdm(self.train_loader, desc="Training with simMIM"):
+            views = batch[0]
+            images = views[0].to(self.device)  # views contains only a single view
+            predictions, targets = self.model(images)
+
+            loss = self.criterion(predictions, targets)
+            running_loss += loss.detach()
+            loss.backward()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+        
+        return running_loss/len(self.train_loader)
     
     def train_one_epoch_simclr_neg_sample(self, epoch=0, alpha=0, neg_batch_idx=None, momentum_val=0, scaler=None):
         self.model.train()
@@ -322,6 +339,8 @@ class Trainer:
             train_one_epoch = self.train_one_epoch_simclr_supcon
         elif self.mode == "dino":
             train_one_epoch = self.train_one_epoch_dino
+        elif self.mode == "simMIM":
+            train_one_epoch = self.train_one_epoch_simMIM
 
         
         scaler = torch.cuda.amp.GradScaler() 
