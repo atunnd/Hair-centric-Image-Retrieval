@@ -7,13 +7,14 @@ from utils.transform import get_test_transform, get_train_transform, TwoCropTran
 from utils.dataloader import CustomDataset
 import torch
 from torch.utils.data import DataLoader
-from src.backbone import SupConResNet, SimCLR, MAE
+from src.backbone import SupConResNet, SimCLR, MAE, DINO, SimMIM
 import torch
 import torchvision
 from torch import nn
 from timm.models.vision_transformer import vit_base_patch32_224
 from lightly.transforms.simclr_transform import SimCLRTransform
 from lightly.transforms import MAETransform
+from lightly.transforms.dino_transform import DINOTransform
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard import SummaryWriter
 
@@ -41,7 +42,7 @@ def parse_args():
     parser.add_argument('--temp', type=float, default=0.7, help="temperature for loss function")
 
     # Model option
-    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon'])
+    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dino', 'simMIM'])
     parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50', "vit_b_16"])
 
     # Optional config
@@ -87,6 +88,9 @@ def main(args):
     elif args.mode == "mae":
         train_transform = MAETransform(input_size=224)
         test_transform = MAETransform(input_size=224)
+    elif args.mode == "dino":
+        train_transform = DINOTransform()
+        test_transform = DINOTransform()
 
     if args.mode == "simclr_supcon":
         train_dataset = CustomDataset(args.train_annotation, args.img_dir, TwoCropTransform(train_transform))
@@ -116,9 +120,15 @@ def main(args):
             output_dim= 512
         #backbone = nn.Sequential(*list(backbone.children())[:-1])
         model = SimCLR(backbone, args.model, attention_pooling = args.atn_pooling)
+
     elif args.mode == "mae":
         vit = vit_base_patch32_224()
         model = MAE(vit)
+    
+    elif args.mode == "dino":
+        backbone = torch.hub.load('facebookresearch/dino:main', 'dino_vits16', pretrained=False)
+        input_dim = backbone.embed_dim
+        model = DINO(backbone, input_dim)
 
     trainer = Trainer(model, train_loader, test_loader, args)
     

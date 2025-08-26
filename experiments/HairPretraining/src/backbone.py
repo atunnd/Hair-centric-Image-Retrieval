@@ -18,6 +18,12 @@ from lightly.models.modules import MAEDecoderTIMM, MaskedVisionTransformerTIMM
 from lightly.transforms import MAETransform
 from lightly.models.utils import deactivate_requires_grad, update_momentum
 
+
+from lightly.models import utils
+from lightly.models.modules.masked_vision_transformer_torchvision import (
+    MaskedVisionTransformerTorchvision,
+)
+
 import torch.nn as nn
 
 import torch
@@ -405,3 +411,69 @@ class MAE(nn.Module):
         # must adjust idx_mask for missing class token
         target = utils.get_at_index(patches, idx_mask - 1)
         return x_pred, target
+
+class DINO(torch.nn.Module):
+    def __init__(self, backbone, input_dim):
+        super().__init__()
+        self.student_backbone = backbone
+        self.student_head = DINOProjectionHead(
+            input_dim, 512, 64, 2048, freeze_last_layer=1
+        )
+        self.teacher_backbone = copy.deepcopy(backbone)
+        self.teacher_head = DINOProjectionHead(input_dim, 512, 64, 2048)
+        deactivate_requires_grad(self.teacher_backbone)
+        deactivate_requires_grad(self.teacher_head)
+
+    def forward(self, x):
+        y = self.student_backbone(x).flatten(start_dim=1)
+        z = self.student_head(y)
+        return z
+
+    def forward_teacher(self, x):
+        y = self.teacher_backbone(x).flatten(start_dim=1)
+        z = self.teacher_head(y)
+        return z
+    
+class SimMIM(nn.Module):
+    def __init__(self, vit):
+        super().__init__()
+
+        decoder_dim = vit.hidden_dim
+        self.mask_ratio = 0.75
+        self.patch_size = vit.patch_size
+        self.sequence_length = vit.seq_length
+
+        self.backbone = MaskedVisionTransformerTorchvision(vit=vit)
+
+        # the decoder is a simple linear layer
+        self.decoder = nn.Linear(decoder_dim, vit.patch_size**2 * 3)
+
+    def forward_encoder(self, images, batch_size, idx_mask):
+        # pass all the tokens to the encoder, both masked and non masked ones
+        return self.backbone.encode(images=images, idx_mask=idx_mask)
+
+    def forward_decoder(self, x_encoded):
+        return self.decoder(x_encoded)
+
+    def forward(self, images):
+        batch_size = images.shape[0]
+        idx_keep, idx_mask = utils.random_token_mask(
+            size=(batch_size, self.sequence_length),
+            mask_ratio=self.mask_ratio,
+            device=images.device,
+        )
+
+        # Encoding...
+        x_encoded = self.forward_encoder(images, batch_size, idx_mask)
+        x_encoded_masked = utils.get_at_index(x_encoded, idx_mask)
+
+        # Decoding...
+        x_out = self.forward_decoder(x_encoded_masked)
+
+        # get image patches for masked tokens
+        patches = utils.patchify(images, self.patch_size)
+
+        # must adjust idx_mask for missing class token
+        target = utils.get_at_index(patches, idx_mask - 1)
+
+        return x_out, target

@@ -6,7 +6,7 @@ from tqdm import tqdm
 import os
 
 import lightly
-from lightly.loss import NTXentLoss
+from lightly.loss import NTXentLoss, DINOLoss
 from utils.losses import SupConLoss
 from utils.utils import get_optimizer, linear_increase_alpha, margin_decay, mse_alignment_loss
 from utils.transform import positive_transform, negative_transform, PositiveMaskingTransform
@@ -40,7 +40,9 @@ class Trainer:
             self.criterion = NTXentLoss()
         elif self.mode == 'simclr_supcon':
             self.criterion = SupConLoss()
-        
+        elif self.mode == "dino":
+            self.criterion = DINOLoss(output_dim=2048,warmup_teacher_temp_epochs=5,)
+
         self.optimizer = get_optimizer(self.model, self.lr, self.weight_decay, self.beta1, self.beta2)
         self.neg_sampling = False
         self.neg_loss = args.neg_loss
@@ -138,14 +140,28 @@ class Trainer:
             self.optimizer.step()
             self.optimizer.zero_grad()
         return running_loss / len(self.train_loader)
-
-    def train_one_epoch_simclr_neg_supervised(self, epoch=0, alpha=0):
+    
+    def train_one_epoch_dino(self, epoch=0, alpha=0):
         self.model.train()
-        running_loss =0.0
-        for batch in tqdm(self.train_loader, desc="Training with supervised negative sampling"):
-            images, labels = batch[0], batch[1].to(self.device)
-            images = [img.to(self.device) for img in images]
+        running_loss = 0.0
+        momentum_val = cosine_schedule(epoch, self.epochs, 0.996, 1)
+        for batch in tqdm(self.train_loader, desc="Training with DINO"):
+            views = batch[0]
+            update_momentum(self.model.student_backbone, self.model.teacher_backbone, m=momentum_val)
+            update_momentum(self.model.student_head, self.model.teacher_head, m=momentum_val)
+            views = [view.to(self.device) for view in views]
+            global_views = views[:2]
+            teacher_out = [self.model.forward_teacher(view) for view in global_views]
+            student_out = [self.model.forward(view) for view in views]
+            loss = self.criterion(teacher_out, student_out, epoch=epoch)
+            running_loss += loss.detach()
+            loss.backward()
+            # We only cancel gradients of student head.
+            self.model.student_head.cancel_last_layer_gradients(current_epoch=epoch)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
+        return running_loss / len(self.train_loader)
     
     def train_one_epoch_simclr_neg_sample(self, epoch=0, alpha=0, neg_batch_idx=None, momentum_val=0, scaler=None):
         self.model.train()
@@ -304,6 +320,8 @@ class Trainer:
             train_one_epoch = self.train_one_epoch_simclr
         elif self.mode == 'simclr_supcon':
             train_one_epoch = self.train_one_epoch_simclr_supcon
+        elif self.mode == "dino":
+            train_one_epoch = self.train_one_epoch_dino
 
         
         scaler = torch.cuda.amp.GradScaler() 
