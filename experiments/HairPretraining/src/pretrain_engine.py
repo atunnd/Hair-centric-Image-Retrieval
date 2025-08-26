@@ -91,91 +91,114 @@ class Trainer:
             self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
             os.makedirs(self.save_path, exist_ok=True)
     
-    def train_one_epoch_simclr(self, epoch=0, alpha=0):
+    def train_one_epoch_simclr(self, epoch=0, alpha=0, scaler=None):
         self.model.train()
         running_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Training"):
-            images = batch[0]
-            x0, x1 = images[0], images[1]
-            x0 = x0.to(self.device)
-            x1 = x1.to(self.device)
-            z0 = self.model(x0)
-            z1 = self.model(x1)
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                images = batch[0]
+                x0, x1 = images[0], images[1]
+                x0 = x0.to(self.device)
+                x1 = x1.to(self.device)
+                z0 = self.model(x0)
+                z1 = self.model(x1)
 
-            loss = self.criterion(z0, z1)
-            running_loss += loss.detach()
-            loss.backward()
-            self.optimizer.step()
+                loss = self.criterion(z0, z1)
+                running_loss += loss.detach()
+
+            #loss.backward()
+            scaler.scale(loss).backward()
+            #self.optimizer.step()
+            scaler.scale(self.optimizer).step()
+            scaler.update()
             self.optimizer.zero_grad() 
         return running_loss / len(self.train_loader)
     
-    def train_one_epoch_mae(self, epoch=0, alpha=0):
+    def train_one_epoch_mae(self, epoch=0, alpha=0, scaler=None):
         self.model.train()
         running_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Training"):
-            views = batch[0]
-            images = views[0].to(self.device)
-            predictions, targets = self.model(images)
-            loss = self.criterion(predictions, targets)
-            running_loss += loss.detach()
-            loss.backward()
-            self.optimizer.step()
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                views = batch[0]
+                images = views[0].to(self.device)
+                predictions, targets = self.model(images)
+                loss = self.criterion(predictions, targets)
+                running_loss += loss.detach()
+            #loss.backward()
+            scaler.scale(loss).backward()
+            #self.optimizer.step()
+            scaler.scale(self.optimizer).step()
+            scaler.update()
             self.optimizer.zero_grad()
         return running_loss / len(self.train_loader)
 
-    def train_one_epoch_simclr_supcon(self, epoch=0, alpha=0):
+    def train_one_epoch_simclr_supcon(self, epoch=0, alpha=0, scaler=None):
         self.model.train()
         running_loss = 0.0
         for batch in tqdm(self.train_loader, desc="Training with simclr on supcon"):
-            images, labels = batch[0], batch[1]
-            images = [img.to(self.device) for img in images]
-            labels = labels.to(self.device)
-            images = torch.cat([images[0], images[1]], dim=0)
-            bsz = labels.shape[0]
-            
-            features = self.model(images)
-            f1, f2 = torch.split(features, [bsz, bsz], dim=0)
-            features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
-            loss = self.criterion(features, labels)
-            running_loss += loss.detach()
-            loss.backward()
-            self.optimizer.step()
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                images, labels = batch[0], batch[1]
+                images = [img.to(self.device) for img in images]
+                labels = labels.to(self.device)
+                images = torch.cat([images[0], images[1]], dim=0)
+                bsz = labels.shape[0]
+                
+                features = self.model(images)
+                f1, f2 = torch.split(features, [bsz, bsz], dim=0)
+                features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+                loss = self.criterion(features, labels)
+                running_loss += loss.detach()
+
+            #loss.backward()
+            scaler.scale(loss).backward()
+            #self.optimizer.step()
+            scaler.scale(self.optimizer).step()
+            scaler.update()
             self.optimizer.zero_grad()
         return running_loss / len(self.train_loader)
     
-    def train_one_epoch_dino(self, epoch=0, alpha=0):
+    def train_one_epoch_dino(self, epoch=0, alpha=0, scaler=None):
         self.model.train()
         running_loss = 0.0
         momentum_val = cosine_schedule(epoch, self.epochs, 0.996, 1)
         for batch in tqdm(self.train_loader, desc="Training with DINO"):
-            views = batch[0]
-            update_momentum(self.model.student_backbone, self.model.teacher_backbone, m=momentum_val)
-            update_momentum(self.model.student_head, self.model.teacher_head, m=momentum_val)
-            views = [view.to(self.device) for view in views]
-            global_views = views[:2]
-            teacher_out = [self.model.forward_teacher(view) for view in global_views]
-            student_out = [self.model.forward(view) for view in views]
-            loss = self.criterion(teacher_out, student_out, epoch=epoch)
-            running_loss += loss.detach()
-            loss.backward()
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                views = batch[0]
+                update_momentum(self.model.student_backbone, self.model.teacher_backbone, m=momentum_val)
+                update_momentum(self.model.student_head, self.model.teacher_head, m=momentum_val)
+                views = [view.to(self.device) for view in views]
+                global_views = views[:2]
+                teacher_out = [self.model.forward_teacher(view) for view in global_views]
+                student_out = [self.model.forward(view) for view in views]
+                loss = self.criterion(teacher_out, student_out, epoch=epoch)
+                running_loss += loss.detach()
+            #loss.backward()
+            scaler.scale(loss).backward()
             # We only cancel gradients of student head.
             self.model.student_head.cancel_last_layer_gradients(current_epoch=epoch)
-            self.optimizer.step()
+            #self.optimizer.step()
+            scaler.step(self.optimizer)
+            scaler.update()
             self.optimizer.zero_grad()
 
         return running_loss / len(self.train_loader)
 
-    def train_one_epoch_simMIM(self, epoch=0, alpha=0):
+    def train_one_epoch_simMIM(self, epoch=0, alpha=0, scaler=None):
         running_loss =0.0
         for batch in tqdm(self.train_loader, desc="Training with simMIM"):
-            views = batch[0]
-            images = views[0].to(self.device)  # views contains only a single view
-            predictions, targets = self.model(images)
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                views = batch[0]
+                images = views[0].to(self.device)  # views contains only a single view
+                predictions, targets = self.model(images)
 
-            loss = self.criterion(predictions, targets)
-            running_loss += loss.detach()
-            loss.backward()
-            self.optimizer.step()
+                loss = self.criterion(predictions, targets)
+                running_loss += loss.detach()
+
+            #loss.backward()
+            scaler.scale(loss).backward()
+            #self.optimizer.step()
+            scaler.step(self.optimizer)
+            scaler.update()
             self.optimizer.zero_grad()
         
         return running_loss/len(self.train_loader)
@@ -374,7 +397,7 @@ class Trainer:
                 elif self.neg_loss == "mae":
                     print(f"Total train loss: {train_loss:.4f}, Triplet loss: {train_trip_loss}, MAE loss: {train_ntxent_loss},  Alpha: {alpha}")
             else:
-                train_loss = train_one_epoch(epoch=epoch, alpha=alpha)
+                train_loss = train_one_epoch(epoch=epoch, alpha=alpha, scaler=scaler)
                 print(f"Train loss: {train_loss:.4f}")
             if (epoch+1) % 20 == 0:
                 output = os.path.join(self.save_path, f"model_ckpt_{epoch}.pth")

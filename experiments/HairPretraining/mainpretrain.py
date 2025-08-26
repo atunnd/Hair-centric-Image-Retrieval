@@ -11,12 +11,17 @@ from src.backbone import SupConResNet, SimCLR, MAE, DINO, SimMIM
 import torch
 import torchvision
 from torch import nn
-from timm.models.vision_transformer import vit_base_patch32_224
+from timm.models.vision_transformer import vit_base_patch16_224
 from lightly.transforms.simclr_transform import SimCLRTransform
 from lightly.transforms import MAETransform
 from lightly.transforms.dino_transform import DINOTransform
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard import SummaryWriter
+
+import sys
+sys.path.append("/data2/dragonzakura/QuocAnh/Composed-Image-Retrieval/experiments/HairPretraining/dino/")
+
+from dino import vision_transformer as vits
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Self-supervised/Supervised Trainer Arguments")
@@ -125,16 +130,17 @@ def main(args):
         model = SimCLR(backbone, args.model, attention_pooling = args.atn_pooling)
 
     elif args.mode == "mae":
-        vit = vit_base_patch32_224()
+        vit = vit_base_patch16_224()
         model = MAE(vit)
     
     elif args.mode == "dino":
-        backbone = torch.hub.load('facebookresearch/dino:main', 'dino_vits16', pretrained=False)
+        #backbone = torch.hub.load('facebookresearch/dino:main', 'dino_vits16', pretrained=False, source="github")
+        backbone = vits.vit_base(patch_size=16)
         input_dim = backbone.embed_dim
         model = DINO(backbone, input_dim)
 
     elif args.mode == "simMIM":
-        vit = torchvision.models.vit_b_32(pretrained=False)
+        vit = torchvision.models.vit_b_16(pretrained=False)
         model = SimMIM(vit)
 
     trainer = Trainer(model, train_loader, test_loader, args)
