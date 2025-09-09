@@ -81,5 +81,5 @@ def set_seed(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 def update_momentum(student, teacher, m):
-        for s_param, t_param in zip(student.parameters(), teacher.parameters()):
-            t_param.data = m * t_param.data + (1 - m) * s_param.data
+    for s_param, t_param in zip(student.parameters(), teacher.parameters()):
+        t_param.data = m * t_param.data + (1 - m) * s_param.data

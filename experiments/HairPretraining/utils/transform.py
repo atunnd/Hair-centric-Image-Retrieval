@@ -145,3 +145,183 @@ class PositiveMaskingTransform:
 # positive = simclr_transform(pil_image)  # torch.Tensor (C, H, W)
 # masking_transform = PositiveMaskingTransform()
 # masked_positive = masking_transform(positive)
+
+
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
+import torch
+import math
+import random
+import numpy as np
+from PIL import Image
+import einops
+
+
+# ===== Custom Flip =====
+class RandomHorizontalFlip(transforms.RandomHorizontalFlip):
+    def forward(self, img, flip=None):
+        if flip is None:
+            flip = torch.rand(1) < self.p
+        if flip:
+            return F.hflip(img), True
+        return img, False
+
+
+# ===== Custom Crop =====
+class SingleRandomResizedCrop(transforms.RandomResizedCrop):
+    @staticmethod
+    def get_params(img, scale, ratio):
+        width, height = F.get_image_size(img)
+        area = height * width
+
+        log_ratio = torch.log(torch.tensor(ratio))
+        for _ in range(10):
+            target_area = area * torch.empty(1).uniform_(scale[0], scale[1]).item()
+            aspect_ratio = torch.exp(torch.empty(1).uniform_(log_ratio[0], log_ratio[1])).item()
+
+            w = int(round(math.sqrt(target_area * aspect_ratio)))
+            h = int(round(math.sqrt(target_area / aspect_ratio)))
+
+            if 0 < w <= width and 0 < h <= height:
+                i = torch.randint(0, height - h + 1, size=(1,)).item()
+                j = torch.randint(0, width - w + 1, size=(1,)).item()
+                return i, j, h, w, width
+
+        # fallback center crop
+        in_ratio = float(width) / float(height)
+        if in_ratio < min(ratio):
+            w = width
+            h = int(round(w / min(ratio)))
+        elif in_ratio > max(ratio):
+            h = height
+            w = int(round(h * max(ratio)))
+        else:
+            w = width
+            h = height
+        i = (height - h) // 2
+        j = (width - w) // 2
+        return i, j, h, w, width
+
+    def forward(self, img, i=None, j=None, h=None, w=None):
+        if i is None or j is None or h is None or w is None:
+            i, j, h, w, W = self.get_params(img, self.scale, self.ratio)
+        else:
+            W, _ = F.get_image_size(img)
+        return F.resized_crop(img, i, j, h, w, self.size, self.interpolation), i, j, h, w, W
+
+
+# ===== Helper: patchify mask =====
+# def get_hair_region_idx(mask_t, patch_size=16):
+#     B, H, W = 1, mask_t.shape[1], mask_t.shape[2]
+#     nh, nw = H // patch_size, W // patch_size
+
+#     mask_patches = einops.rearrange(
+#         mask_t.unsqueeze(0),
+#         "b 1 (nh ph) (nw pw) -> b (nh nw) (ph pw)",
+#         ph=patch_size, pw=patch_size
+#     )
+#     has_hair = (mask_patches.sum(dim=-1) > 0)
+#     hair_region_idx = torch.nonzero(has_hair[0], as_tuple=False).squeeze(1)
+#     return hair_region_idx
+
+import torch
+import einops
+
+def get_hair_region_idx(mask_t, patch_size=16):
+    # mask_t: [batch_size, H, W], binary mask of hair region
+    B, H, W = mask_t.shape
+    nh, nw = H // patch_size, W // patch_size
+
+    # Convert image mask to patch-level mask
+    mask_patches = einops.rearrange(
+        mask_t.unsqueeze(1),  # Add channel dim
+        "b 1 (nh ph) (nw pw) -> b (nh nw) (ph pw)",
+        ph=patch_size, pw=patch_size
+    )  # [batch_size, num_patches, patch_size*patch_size]
+
+    # Binary mask: 1 if patch contains hair (any pixel > 0), 0 otherwise
+    has_hair = (mask_patches.sum(dim=-1) > 0).float()  # [batch_size, num_patches]
+    return has_hair
+
+
+# ===== Augmentation with mask =====
+class DataAugmentationForSIMWithMask(object):
+    def __init__(self, args):
+        self.args = args
+
+        self.random_resized_crop = SingleRandomResizedCrop(
+            args.input_size, scale=(args.crop_min, 1.0), interpolation=3
+        )
+        self.random_flip = RandomHorizontalFlip()
+
+        self.color_transform1 = transforms.Compose([
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomApply([
+                transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0))
+            ], p=1.0),
+        ])
+
+        self.color_transform2 = transforms.Compose([
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomApply([
+                transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0))
+            ], p=1.0),
+        ])
+
+        # ✅ Positive transform (split thành rotate + blur)
+        self.pos_rotation = transforms.RandomRotation(degrees=(-45, 45))
+        self.pos_blur = transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5))
+
+        self.format_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            )
+        ])
+
+    def __call__(self, image, mask):
+        # === 1. Flip đồng bộ ===
+        image1, flip1 = self.random_flip(image)
+        image2, flip2 = self.random_flip(image)
+        mask1, _ = self.random_flip(mask, flip=flip1)
+        mask2, _ = self.random_flip(mask, flip=flip2)
+
+        # === 2. Crop đồng bộ ===
+        image1, i1, j1, h1, w1, W = self.random_resized_crop(image1)
+        image2, i2, j2, h2, w2, W = self.random_resized_crop(image2)
+        mask1, _, _, _, _, _ = self.random_resized_crop(mask1, i=i1, j=j1, h=h1, w=w1)
+        mask2, _, _, _, _, _ = self.random_resized_crop(mask2, i=i2, j=j2, h=h2, w=w2)
+
+        # === 3. Color aug chỉ cho ảnh ===
+        color_image1 = self.color_transform1(image1)
+        color_image2 = self.color_transform2(image2)
+
+        # === 4. Positive transform từ image2 + mask2 ===
+        angle = random.uniform(-15, 15)
+        pos_image = F.rotate(image2, angle)
+        pos_image = self.pos_blur(pos_image)  # chỉ blur image
+        pos_mask = F.rotate(mask2, angle)     # mask chỉ rotate, không blur
+
+        # === 5. To tensor ===
+        image1_t = self.format_transform(color_image1)
+        image2_t = self.format_transform(color_image2)
+        pos_image_t = self.format_transform(pos_image)
+
+        mask1_t = (F.to_tensor(mask1)[0:1, :, :] > 0).float()
+        mask2_t = (F.to_tensor(mask2)[0:1, :, :] > 0).float()
+        pos_mask_t = (F.to_tensor(pos_mask)[0:1, :, :] > 0).float()
+
+        # === 6. Hair idx ===
+        mask1_idx = get_hair_region_idx(mask1_t, patch_size=16)
+        mask2_idx = get_hair_region_idx(mask2_t, patch_size=16)
+        pos_mask_idx = get_hair_region_idx(pos_mask_t, patch_size=16)
+
+        relative_flip = (flip1 and not flip2) or (flip2 and not flip1)
+
+        return (image1_t, mask1_t, mask1_idx), \
+               (image2_t, mask2_t, mask2_idx), \
+               (pos_image_t, pos_mask_t, pos_mask_idx), \
+               (i2 - i1) / h1, (j2 - j1) / w1, h2 / h1, w2 / w1, relative_flip, (W - j1 - j2) / w1

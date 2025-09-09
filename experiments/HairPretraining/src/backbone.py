@@ -4,8 +4,8 @@ from torch import nn
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lightly.models import utils
-from lightly.models.modules import MAEDecoderTIMM, MaskedVisionTransformerTIMM, SimCLRProjectionHead, DINOProjectionHead
+from lightly.models import utils 
+from lightly.models.modules import MAEDecoderTIMM, SimCLRProjectionHead, DINOProjectionHead
 from lightly.transforms.simclr_transform import SimCLRTransform
 from lightly.loss import DINOLoss
 from lightly.models.utils import deactivate_requires_grad, update_momentum
@@ -13,13 +13,9 @@ from lightly.transforms.dino_transform import DINOTransform
 from lightly.utils.scheduler import cosine_schedule
 
 import copy
-from lightly.models import utils
-from lightly.models.modules import MAEDecoderTIMM, MaskedVisionTransformerTIMM
+from lightly.models.modules import MAEDecoderTIMM
 from lightly.transforms import MAETransform
 from lightly.models.utils import deactivate_requires_grad, update_momentum
-
-
-from lightly.models import utils
 from lightly.models.modules.masked_vision_transformer_torchvision import (
     MaskedVisionTransformerTorchvision,
 )
@@ -29,6 +25,7 @@ import torch.nn as nn
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from .masked_vision_transformer_timm import MaskedVisionTransformerTIMM
 
 # Giả định SimCLRProjectionHead (thay bằng lightly nếu dùng)
 # class SimCLRProjectionHead(nn.Module):
@@ -238,7 +235,126 @@ class SimCLR(nn.Module):
             return features.flatten(start_dim=1)
 
 
+import torch
+import torch.nn as nn
+import copy
 
+class SimCLR_Our(nn.Module):
+    def __init__(self, vit, mask=None, max_patches=100):
+        super().__init__()
+        decoder_dim = 512
+        self.mask_ratio = 0.75
+        self.patch_size = vit.patch_embed.patch_size[0]
+
+        self.backbone = MaskedVisionTransformerTIMM(vit=vit)
+        self.sequence_length = self.backbone.sequence_length
+
+        self.decoder = MAEDecoderTIMM(
+            num_patches=vit.patch_embed.num_patches,
+            patch_size=self.patch_size,
+            embed_dim=vit.embed_dim,
+            decoder_embed_dim=decoder_dim,
+            decoder_depth=1,
+            decoder_num_heads=16,
+            mlp_ratio=4.0,
+            proj_drop_rate=0.0,
+            attn_drop_rate=0.0,
+        )
+
+        proj_input_dim = 768  # For vit_b_16
+        output_dim = 512
+        self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
+
+        self.backbone_momentum = copy.deepcopy(self.backbone)
+        self.projection_head_momentum = copy.deepcopy(self.projection_head)
+        self.decoder_momentum = copy.deepcopy(self.decoder)
+        for param in self.backbone_momentum.parameters():
+            param.requires_grad = False
+        for param in self.projection_head_momentum.parameters():
+            param.requires_grad = False
+        for param in self.decoder_momentum.parameters():
+            param.requires_grad = False
+
+    def forward_encoder(self, images, idx_keep=None, hair_region_idx=None):
+        if hair_region_idx is not None:
+            return self.backbone.encode(images=images, idx_keep=None, hair_region_idx=hair_region_idx)
+        else:
+            return self.backbone.encode(images=images, idx_keep=idx_keep)
+
+    def forward_encoder_momentum(self, images, idx_keep=None, hair_region_idx=None):
+        if hair_region_idx is not None:
+            return self.backbone_momentum.encode(images=images, idx_keep=None, hair_region_idx=hair_region_idx)
+        else:
+            return self.backbone_momentum.encode(images=images, idx_keep=idx_keep)
+
+    def forward_decoder(self, x_encoded, idx_keep, idx_mask):
+        batch_size = x_encoded.shape[0]
+        x_decode = self.decoder.embed(x_encoded)
+        x_masked = utils.repeat_token(
+            self.decoder.mask_token, (batch_size, self.sequence_length)
+        )
+        x_masked = utils.set_at_index(x_masked, idx_keep, x_decode.type_as(x_masked))
+        x_decoded = self.decoder.decode(x_masked)
+        x_pred = utils.get_at_index(x_decoded, idx_mask)
+        x_pred = self.decoder.predict(x_pred)
+        return x_pred
+
+    def forward_decoder_momentum(self, x_encoded, idx_keep, idx_mask):
+        batch_size = x_encoded.shape[0]
+        x_decode = self.decoder_momentum.embed(x_encoded)
+        x_masked = utils.repeat_token(
+            self.decoder.mask_token, (batch_size, self.sequence_length)
+        )
+        x_masked = utils.set_at_index(x_masked, idx_keep, x_decode.type_as(x_masked))
+        x_decoded = self.decoder_momentum.decode(x_masked)
+        x_pred = utils.get_at_index(x_decoded, idx_mask)
+        x_pred = self.decoder_momentum.predict(x_pred)
+        return x_pred
+
+    def forward(self, images, reconstruction=False, hair_region_idx=None):
+        if reconstruction:
+            batch_size = images.shape[0]
+            idx_keep, idx_mask = utils.random_token_mask(
+                size=(batch_size, self.sequence_length),
+                mask_ratio=self.mask_ratio,
+                device=images.device,
+            )
+            x_encoded = self.forward_encoder(images=images, idx_keep=idx_keep)
+            #print(f"x_encoded reconstruction: {x_encoded.shape}\n") #torch.Size([32, 50, 768])
+            x_pred = self.forward_decoder(
+                x_encoded=x_encoded, idx_keep=idx_keep, idx_mask=idx_mask
+            )
+            patches = utils.patchify(images, self.patch_size)
+            target = utils.get_at_index(patches, idx_mask - 1)
+            return x_pred, target
+        else:
+            x_encoded = self.forward_encoder(images=images, idx_keep=None, hair_region_idx=hair_region_idx)
+            x_encoded = self.projection_head(x_encoded[:, 0, :])  # Use CLS token
+            #print(f"x_encoded hair: {x_encoded.shape}\n")
+            return x_encoded, None
+
+    def forward_momentum(self, images, reconstruction=False, hair_region_idx=None):
+        if reconstruction:
+            batch_size = images.shape[0]
+            idx_keep, idx_mask = utils.random_token_mask(
+                size=(batch_size, self.sequence_length),
+                mask_ratio=self.mask_ratio,
+                device=images.device,
+            )
+            x_encoded = self.forward_encoder_momentum(images=images, idx_keep=idx_keep)
+            #print(f"x_encoded hair momentum: {x_encoded.shape}\n") #torch.Size([32, 50, 768])
+            x_pred = self.forward_decoder_momentum(
+                x_encoded=x_encoded, idx_keep=idx_keep, idx_mask=idx_mask
+            )
+            patches = utils.patchify(images, self.patch_size)
+            target = utils.get_at_index(patches, idx_mask - 1)
+            return x_pred, target
+        else:
+            x_encoded = self.forward_encoder_momentum(images=images, idx_keep=None, hair_region_idx=hair_region_idx)
+            x_encoded = self.projection_head_momentum(x_encoded[:, 0, :])  # Use CLS token
+            #print(f"x_encoded hair momentum: {x_encoded.shape}\n") #torch.Size([32, 50, 768])
+            return x_encoded, None
+        
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -268,13 +384,6 @@ class BasicBlock(nn.Module):
             return out, preact
         else:
             return out
-
-
-
-
-
-
-
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -485,7 +594,8 @@ class MAE(nn.Module):
         )
 
     def forward_encoder(self, images, idx_keep=None):
-        return self.backbone.encode(images=images, idx_keep=idx_keep)
+        z = self.backbone.encode(images=images, idx_keep=idx_keep)
+        return z
 
     def forward_decoder(self, x_encoded, idx_keep, idx_mask):
         # build decoder input
@@ -521,6 +631,10 @@ class MAE(nn.Module):
         # must adjust idx_mask for missing class token
         target = utils.get_at_index(patches, idx_mask - 1)
         return x_pred, target
+    
+    def extract_features(self, images):
+        x_encoded = self.forward_encoder(images=images, idx_keep=None)
+        return x_encoded[:, 0, :]
 
 class DINO(torch.nn.Module):
     def __init__(self, backbone, input_dim):
@@ -564,6 +678,16 @@ class SimMIM(nn.Module):
 
     def forward_decoder(self, x_encoded):
         return self.decoder(x_encoded)
+    
+    def extract_features(self, images):
+        batch_size = images.shape[0]
+        idx_keep, idx_mask = utils.random_token_mask(
+            size=(batch_size, self.sequence_length),
+            mask_ratio = self.mask_ratio,
+            device=images.device
+        )
+        x_encoded = self.forward_encoder(images, batch_size, idx_mask)
+        return x_encoded[:, 0, :]
 
     def forward(self, images):
         batch_size = images.shape[0]

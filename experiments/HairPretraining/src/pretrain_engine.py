@@ -7,7 +7,6 @@ import os
 
 import lightly
 from lightly.loss import NTXentLoss
-from utils.losses import SupConLoss, DINOLoss
 from utils.utils import get_optimizer, linear_increase_alpha, margin_decay, mse_alignment_loss
 from utils.transform import positive_transform, negative_transform, PositiveMaskingTransform
 
@@ -83,13 +82,11 @@ class Trainer:
             # extract negative sample
             self.negative_batch_idx =[]
 
-            
-
-            for batch in tqdm(self.train_loader, desc="Negative mining"):
-                #images = batch[0][1]
-                images = batch[0][0]
-                images = images.to(self.device)
-                self.negative_batch_idx.append(NegSamplerNN(images, 7, 'cosine'))
+            # for batch in tqdm(self.train_loader, desc="Negative mining"):
+            #     #images = batch[0][1]
+            #     images = batch[0][1]
+            #     images = images.to(self.device)
+            #     self.negative_batch_idx.append(NegSamplerNN(images, 7, 'cosine'))
 
         else:
             self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
@@ -221,74 +218,72 @@ class Trainer:
         #triplet_loss = nn.TripletMarginLoss(margin=trip_margin, p=2, eps=1e-7)
 
         for batch_id, batch in enumerate(tqdm(self.train_loader, desc="Training with negative samples")):
-            images, labels = batch[0], batch[1].to(self.device)
+            images, hair_region_idx = batch[0], batch[1]
             current_m = momentum_val  # Hoặc: current_m = 0.996 + (0.004 * min(1, epoch / self.warm_up_epochs))
         
             update_momentum(self.model.backbone, self.model.backbone_momentum, m=current_m)
             update_momentum(self.model.projection_head, self.model.projection_head_momentum, m=current_m)
+            update_momentum(self.model.decoder, self.model.decoder_momentum, m=current_m)
             trip_loss = 0.0
 
             if self.neg_loss == "mae":
                 images0 = images[0].to(self.device)
                 images1 = images0.clone()
             elif self.neg_loss == "simclr":
-                images0, images1 = images[0], images[1]
+                images0, images1, images2 = images[0], images[1], images[2]
                 images0 = images0.to(self.device)
                 images1 = images1.to(self.device)
+                images2 = images2.to(self.device)
+
+                hair_region_idx0, hair_region_idx1, hair_region_idx2 = hair_region_idx[0], hair_region_idx[1], hair_region_idx[2]
+                hair_region_idx0 = hair_region_idx0.to(self.device)
+                hair_region_idx1 = hair_region_idx1.to(self.device)
+                hair_region_idx2 = hair_region_idx2.to(self.device)
 
             ### STAGE 1: Randomly negative sampling
             if self.warm_up_epochs > epoch + 1:
-                negative_samples = NegSamplerRandomly(images1)
+                negative_samples = NegSamplerRandomly(images2)
 
             ### STAGE 2: Hard negative mining
             else:
-                negative_samples = images1[self.negative_batch_idx[batch_id]]
+                negative_samples = images2[self.negative_batch_idx[batch_id]]
 
-            if self.neg_loss == "mae":
-                with torch.no_grad():
-                    negative_samples = negative_transform(negative_samples)
-                    neg_batch_prediction, neg_batch_target, neg_batch_z = self.model(negative_samples) # torch.Size([256, 37, 3072]) torch.Size([256, 37, 3072]) torch.Size([256, 13, 768])
-                    pos_samples = images1
-                    pos_batch_prediction, pos_batch_target, pos_batch_z = self.model(positive_transform(pos_samples))
-                anchor_batch_prediction, anchor_batch_target, anchor_batch_z = self.model(images0)
+            with torch.cuda.amp.autocast():
+                # print("image0: ", images0.shape, hair_region_idx0.shape)
+                # print("image1: ", images1.shape, hair_region_idx1.shape)
+                # print("image2: ", images2.shape, hair_region_idx2.shape)
+                anchor_batch, anchor_batch_patch = self.model(images0, hair_region_idx=hair_region_idx0)
+                pos_samples = images1
+                pos_batch, pos_batch_patch = self.model(pos_samples, hair_region_idx=hair_region_idx1)
 
-            elif self.neg_loss == "simclr":
-                with torch.cuda.amp.autocast():
-                    anchor_batch, anchor_batch_patch = self.model(images0)
+                if "vit" in str(self.mode_model):
+                    with torch.no_grad():
+                        neg_batch, neg_batch_patch = self.model.forward_momentum(negative_samples, hair_region_idx=hair_region_idx2)
+                    pos_batch_prediction, pos_batch_target = self.model(pos_samples, reconstruction=True)
+                    #print("anchor: ", anchor_batch.shape) # [32, 512]
+                    #print("pos sample: ", pos_batch.shape) # [32, 512]
+                    #print("neg sample: ", neg_batch.shape) # [32, 512]
+                    #print("masked pos batch: ", pos_batch_prediction.shape, pos_batch_target.shape) # [32, 97, 768] [32, 97, 768]
+                else:
+                    neg_batch, neg_batch_patch = self.model(negative_samples)
+                    pos_samples = positive_transform(images1)
+                    pos_batch, pos_batch_patch = self.model(pos_samples)
+                    masked_pos_samples= self.positive_masking_transform(pos_samples)
+                    masked_pos_batch, masked_pos_batch_patch = self.model(masked_pos_samples)
+                    masked_pos_batch = masked_pos_batch.detach()
 
-                    if "vit" in str(self.mode_model):
-                        with torch.no_grad():
-                            neg_batch, neg_batch_patch = self.model.forward_momentum(negative_samples)
-                            pos_samples = positive_transform(images1)
-                            pos_batch, pos_batch_patch = self.model.forward_momentum(pos_samples)
-                            masked_pos_samples= self.positive_masking_transform(pos_samples)
-                            masked_pos_batch, masked_pos_batch_patch = self.model.forward_momentum(masked_pos_samples)
-                            masked_pos_batch = masked_pos_batch.detach()
-                    else:
-                        neg_batch, neg_batch_patch = self.model(negative_samples)
-                        pos_samples = positive_transform(images1)
-                        pos_batch, pos_batch_patch = self.model(pos_samples)
-                        masked_pos_samples= self.positive_masking_transform(pos_samples)
-                        masked_pos_batch, masked_pos_batch_patch = self.model(masked_pos_samples)
-                        masked_pos_batch = masked_pos_batch.detach()
-
-                    if masked_pos_batch_patch is not None:
-                        masked_pos_batch_patch = masked_pos_batch_patch.detach()
+                # if masked_pos_batch_patch is not None:
+                #     masked_pos_batch_patch = masked_pos_batch_patch.detach()
 
             if self.neg_loss == "simclr":
                 neg_batch = F.normalize(neg_batch, p=2, dim=1)
                 pos_batch = F.normalize(pos_batch, p=2, dim=1)
                 anchor_batch = F.normalize(anchor_batch, p=2, dim=1)
-                masked_pos_batch = F.normalize(masked_pos_batch, p=2, dim=1)
+                #masked_pos_batch = F.normalize(masked_pos_batch, p=2, dim=1)
                 if neg_batch_patch is not None:
                     neg_batch_patch = F.normalize(neg_batch_patch, p=2, dim=1)
                     pos_batch_patch = F.normalize(pos_batch_patch, p=2, dim=1)
                     anchor_batch_patch = F.normalize(anchor_batch_patch, p=2, dim=1)
-            elif self.neg_loss == "mae":
-                batch_size = neg_batch_z.shape[0]
-                neg_batch = F.normalize(neg_batch_z.view(batch_size, -1), p=2, dim=1)
-                pos_batch = F.normalize(pos_batch_z.view(batch_size, -1), p=2, dim=1)
-                anchor_batch = F.normalize(anchor_batch_z.view(batch_size, -1), p=2, dim=1)
 
             # Debug distances
             # Debug distances
@@ -326,18 +321,17 @@ class Trainer:
                     nt_xent_loss = self.criterion(pos_batch, anchor_batch)
                     running_loss2 += nt_xent_loss.item()
 
-                    if neg_batch_patch is None:
-                        mse_loss = F.mse_loss(pos_batch, masked_pos_batch, reduction='mean')
+                    if "vit" in str(self.mode_model):
+                        mse_loss = F.mse_loss(pos_batch_prediction, pos_batch_target, reduction="mean")
                     else:
-                        mse_loss = F.mse_loss(pos_batch_patch, masked_pos_batch_patch, reduction="mean")
+                        if neg_batch_patch is None:
+                            mse_loss = F.mse_loss(pos_batch, masked_pos_batch, reduction='mean')
+                        else:
+                            mse_loss = F.mse_loss(pos_batch_patch, masked_pos_batch_patch, reduction="mean")
                     running_loss3 += mse_loss.item()
                     
                     total_loss = nt_xent_loss + alpha*trip_loss + beta * mse_loss
-
-                elif self.neg_loss == "mae":
-                    mse_loss = self.criterion(anchor_batch_prediction, anchor_batch_target)
-                    running_loss2 += mse_loss.item()
-                    total_loss = mse_loss + alpha*trip_loss
+                    
 
                 running_loss += total_loss.detach()
 
@@ -391,7 +385,6 @@ class Trainer:
             neg_batch_idx= [torch.Tensor([]) for _ in range(len(self.train_loader))]
             
         for epoch in range(self.epochs):
-            alpha = 1
             if self.neg_sampling:
                 # if self.warm_up_epochs <= epoch + 1:
                 #     #alpha = linear_increase_alpha(start_alpha=.01, current_epoch=(epoch+1)-self.warm_up_epochs, max_epochs=self.epochs-self.warm_up_epochs)

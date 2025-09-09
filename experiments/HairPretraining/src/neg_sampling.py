@@ -148,7 +148,7 @@ def NegSamplerNN(batch: torch.Tensor, k: int, metric: str):
     backbone = nn.Sequential(*list(resnet.children())[:-1])
     model = OriginSimCLR(backbone, model="resnet18").to(device)
     #model = SimCLR(backbone).to(device)
-    checkpoint_path = "/data2/dragonzakura/QuocAnh/Composed-Image-Retrieval/experiments/HairPretraining/output_dir/simclr_60k/cpkt_450.pth"
+    checkpoint_path = "/mnt/mmlab2024nas/thanhnd_student/QuocAnh/FCIR/Baselines/Composed-Image-Retrieval/hair_representation/lightly/output_dir/simclr_60k/cpkt_450.pth"
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.eval()
 
