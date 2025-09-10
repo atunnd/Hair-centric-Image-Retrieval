@@ -11,18 +11,20 @@ from utils.utils import get_optimizer, linear_increase_alpha, margin_decay, mse_
 from utils.transform import positive_transform, negative_transform, PositiveMaskingTransform
 
 from .backbone import DINO
+from utils.losses import DINOLoss, IBOTPatchLoss
 from .neg_sampling import NegSamplerClasses, NegSamplerRandomly, NegSamplerNN
 import timm
 from lightly.utils.scheduler import cosine_schedule
 from lightly.models.utils import deactivate_requires_grad, update_momentum
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
-from lightly.loss import DINOLoss, IBOTPatchLoss, KoLeoLoss
+from lightly.loss import KoLeoLoss
 from lightly.models.utils import (
     random_block_mask,
     update_drop_path_rate,
     update_momentum,
 )
+from lightly.utils.scheduler import cosine_schedule, linear_warmup_schedule
 
 class Trainer:
     def __init__(self, model, train_loader, val_loader, args):
@@ -173,7 +175,7 @@ class Trainer:
     def train_one_epoch_dinov2(self, epoch=0, alpha=0, scaler=None):
         self.model.train()
         running_loss = 0.0
-
+        self.total_steps = self.epochs * len(self.train_loader)
         for batch_idx, batch in enumerate(tqdm(self.train_loader, desc="Training with dinov2")):
             views = batch[0]
             views = [view.to(self.device) for view in views]

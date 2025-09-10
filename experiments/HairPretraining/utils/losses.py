@@ -287,3 +287,228 @@ class DINOLoss(Module):
         self.center.data = center.center_momentum(
             center=self.center, batch_center=batch_center, momentum=self.center_momentum
         )
+
+import torch
+from torch import Tensor
+from torch.nn import Module
+from torch.nn import functional as F
+
+from lightly.models.modules.center import Center
+
+
+from typing import Tuple
+
+import torch
+import torch.distributed as dist
+from torch import Tensor
+from torch.nn import Module
+
+
+class Center(Module):
+    """Center module to compute and store the center of a feature tensor as used
+    in DINO [0].
+
+    - [0]: DINO, 2021, https://arxiv.org/abs/2104.14294
+
+    Attributes:
+        size:
+            Size of the tracked center tensor. Dimensions across which the center
+            is computed must be set to 1. For example, if the feature tensor has shape
+            (batch_size, sequence_length, feature_dim) and the center should be computed
+            across the batch and sequence dimensions, the size should be
+            (1, 1, feature_dim).
+        mode:
+            Mode to compute the center. Currently only 'mean' is supported.
+        momentum:
+            Momentum term for the center calculation.
+    """
+
+    def __init__(
+        self,
+        size: Tuple[int, ...],
+        mode: str = "mean",
+        momentum: float = 0.9,
+    ) -> None:
+        """Initializes the Center module with the specified parameters.
+
+        Raises:
+            ValueError: If an unknown mode is provided.
+        """
+        super().__init__()
+
+        center_fn = CENTER_MODE_TO_FUNCTION.get(mode)
+        if center_fn is None:
+            raise ValueError(
+                f"Unknown mode '{mode}'. Valid modes are "
+                f"{sorted(CENTER_MODE_TO_FUNCTION.keys())}."
+            )
+        self._center_fn = center_fn
+
+        self.size = size
+        self.dim = tuple(i for i, s in enumerate(size) if s == 1)
+        self.center: Tensor  # For mypy
+        self.register_buffer("center", torch.zeros(self.size))
+        self.momentum = momentum
+
+    @property
+    def value(self) -> Tensor:
+        """The current value of the center.
+
+        Use this property to do any operations based on the center.
+        """
+        return self.center
+
+    @torch.no_grad()
+    def update(self, x: Tensor) -> None:
+        """Update the center with a new batch of features.
+
+        Args:
+            x:
+                Feature tensor used to update the center. Must have the same number of
+                dimensions as self.size.
+        """
+        device=x.device
+        batch_center = self._center_fn(x=x, dim=self.dim)
+        self.center = self.center.to(device)
+        self.center = center_momentum(
+            center=self.center, batch_center=batch_center, momentum=self.momentum
+        )
+
+    @torch.no_grad()
+    def _center_mean(self, x: Tensor) -> Tensor:
+        """Returns the center of the input tensor by calculating the mean."""
+        return center_mean(x=x, dim=self.dim)
+
+
+@torch.no_grad()
+def center_mean(x: Tensor, dim: Tuple[int, ...]) -> Tensor:
+    """Returns the center of the input tensor by calculating the mean.
+
+    Args:
+        x:
+            Input tensor.
+        dim:
+            Dimensions along which the mean is calculated.
+
+    Returns:
+        The center of the input tensor.
+    """
+    batch_center = torch.mean(x, dim=dim, keepdim=True)
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(batch_center)
+        batch_center = batch_center / dist.get_world_size()
+    return batch_center
+
+
+@torch.no_grad()
+def center_momentum(center: Tensor, batch_center: Tensor, momentum: float) -> Tensor:
+    """Returns the new center with momentum update."""
+    return center * momentum + batch_center * (1 - momentum)
+
+
+CENTER_MODE_TO_FUNCTION = {
+    "mean": center_mean,
+}
+
+class IBOTPatchLoss(Module):
+    """Implementation of the iBOT patch loss [0] as used in DINOv2 [1].
+
+    Implementation is based on [2].
+
+    - [0]: iBOT, 2021, https://arxiv.org/abs/2111.07832
+    - [1]: DINOv2, 2023, https://arxiv.org/abs/2304.07193
+    - [2]: https://github.com/facebookresearch/dinov2/blob/main/dinov2/loss/ibot_patch_loss.py
+
+    Attributes:
+        output_dim:
+            Dimension of the model output.
+        teacher_temp:
+            Temperature for the teacher output.
+        student_temp:
+            Temperature for the student output.
+        center_mode:
+            Mode for center calculation. Only 'mean' is supported.
+        center_momentum:
+            Momentum term for the center update.
+    """
+
+    def __init__(
+        self,
+        output_dim: int = 65536,
+        teacher_temp: float = 0.04,
+        student_temp: float = 0.1,
+        center_mode: str = "mean",
+        center_momentum: float = 0.9,
+    ) -> None:
+        """Initializes the iBOTPatchLoss module with the specified parameters."""
+        super().__init__()
+
+        self.teacher_temp = teacher_temp
+        self.student_temp = student_temp
+
+        self.center = Center(
+            size=(1, output_dim),
+            mode=center_mode,
+            momentum=center_momentum,
+        )
+
+    def forward(
+        self,
+        teacher_out: Tensor,
+        student_out: Tensor,
+        mask: Tensor,
+        teacher_temp: float | None = None,
+    ) -> Tensor:
+        """Forward pass through the iBOT patch loss.
+
+        Args:
+            teacher_out:
+                Tensor with shape (batch_size * sequence_length, embed_dim) containing
+                the teacher output of the masked tokens.
+            student_out:
+                Tensor with shape (batch_size * sequence_length, embed_dim) containing
+                the student output of the masked tokens.
+            mask:
+                Boolean tensor with shape (batch_size, height, width) containing the
+                token mask. Exactly batch_size * sequence_length entries must be set to
+                True in the mask.
+            teacher_temp:
+                The temperature used for the teacher output. If None, the default
+                temperature defined in __init__ is used.
+
+        Returns:
+            The loss value.
+        """
+        # B = batch size, N = sequence length = number of masked tokens, D = embed dim
+        # H = height (in tokens), W = width (in tokens)
+        # Note that N <= H * W depending on how many tokens are masked.
+
+        device = teacher_out.device
+        center_value = self.center.value.to(device)
+
+        teacher_temperature = torch.tensor(
+            teacher_temp if teacher_temp is not None else self.teacher_temp
+        )
+
+        # Calculate cross-entropy loss.
+        teacher_softmax = F.softmax(
+            (teacher_out - center_value) / teacher_temperature, dim=-1
+        )
+        student_log_softmax = F.log_softmax(student_out / self.student_temp, dim=-1)
+
+        # (B * N, D) -> (B * N)
+        loss = -torch.sum(teacher_softmax * student_log_softmax, dim=-1)
+
+        # Get weights.
+        # (B, H, W) -> (B, 1, 1)
+        num_masked_per_image = mask.sum(dim=(1, 2), keepdim=True).clamp(min=1.0)
+        # (B, 1, 1) -> (B, H, W) -> (B * N)
+        weight = (1.0 / num_masked_per_image).expand_as(mask)[mask]
+
+        # Apply weighting.
+        B = mask.shape[0]
+        loss = (loss * weight).sum() / B
+
+        self.center.update(teacher_out)
+
+        return loss
