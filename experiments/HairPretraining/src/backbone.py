@@ -736,11 +736,60 @@ class SimMIM(nn.Module):
         return x_out, target
     
 
+# class OriginSimCLR(nn.Module):
+#     def __init__(self, backbone, model=None, attention_pooling=False):
+#         super().__init__()
+#         self.model = model
+#         self.attn_pooling = attention_pooling
+        
+#         # Handle backbone: For ViT, wrap it
+#         if "vit" in str(model):
+#             vit = models.vit_b_16()  # Load full ViT if backbone is not already wrapped
+#             self.backbone = ViTBackbone(vit)
+#             proj_input_dim = 768  # For vit_b_16
+#             output_dim = 512
+#         else:
+#             self.backbone = backbone  # Assume ResNet-like, already Sequential[:-1]
+#             if model == "resnet18":
+#                 proj_input_dim = 512
+#                 output_dim=128
+#             elif model == "resnet50":
+#                 proj_input_dim = 2048
+#                 output_dim=1024
+#             else:
+#                 raise ValueError("Unsupported model")
+        
+#         self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
+        
+
+#     def forward(self, x):
+#          # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
+        
+#         if "vit" in str(self.model):
+#             x, top_patches = self.backbone(x) 
+#             cls_token = x[:, 0, :]  # CLS token [batch, dim]
+#             z = self.projection_head(cls_token)
+#             return z, top_patches
+#         else:
+#             x = self.backbone(x) 
+#             x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
+#             z = self.projection_head(x)
+#             return z
+    
+#     def extract_features(self, x):
+#         features = self.backbone(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
+        
+#         if "vit" in str(self.model):
+#             embedding = features[:, 0, :]
+#         else:
+#             embedding = features.flatten(start_dim=1)  # [batch, features] for ResNet-like
+        
+#         return embedding  # Always [batch, dim] raw from backbone
+
 class OriginSimCLR(nn.Module):
-    def __init__(self, backbone, model=None, attention_pooling=False):
+    def __init__(self, backbone, model=None):
         super().__init__()
         self.model = model
-        self.attn_pooling = attention_pooling
         
         # Handle backbone: For ViT, wrap it
         if "vit" in str(model):
@@ -760,31 +809,30 @@ class OriginSimCLR(nn.Module):
                 raise ValueError("Unsupported model")
         
         self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
-        
 
     def forward(self, x):
-         # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
+        x = self.backbone(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
         
         if "vit" in str(self.model):
-            x, top_patches = self.backbone(x) 
-            cls_token = x[:, 0, :]  # CLS token [batch, dim]
-            z = self.projection_head(cls_token)
-            return z, top_patches
+            if self.attn_pooling:
+                cls_token = x[:, 0, :]
+                patch_token = self.pooled(x)  # [batch, dim]
+                z = self.projection_head(cls_token)
+            else:
+                cls_token = x[:, 0, :]  # CLS token [batch, dim]
+                patch_token = x[:, 1:, :]
+                z = self.projection_head(cls_token)
+            return z, patch_token
+            
         else:
-            x = self.backbone(x) 
             x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
             z = self.projection_head(x)
-            return z
+            return z, None
     
     def extract_features(self, x):
-        features = self.backbone(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
+        x = self.backbone(x).flatten(start_dim=1)
+        return x
         
-        if "vit" in str(self.model):
-            embedding = features[:, 0, :]
-        else:
-            embedding = features.flatten(start_dim=1)  # [batch, features] for ResNet-like
-        
-        return embedding  # Always [batch, dim] raw from backbone
 
 import copy
 from functools import partial

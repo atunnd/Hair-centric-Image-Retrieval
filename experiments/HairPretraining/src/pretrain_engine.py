@@ -349,19 +349,21 @@ class Trainer:
                 #     if batch_id == 0:
                 #         print("Negative idx after mining: ", self.negative_batch_idx[batch_id])
                 # else:
-                #     if batch_id == 0:
-                #         print("Negative idx from stores: ", self.negative_batch_idx[batch_id])
+                if batch_id == 0:
+                    print("Negative idx from stores: ", self.negative_batch_idx[batch_id])
+                    print("Len idx: ", len(self.negative_batch_idx[batch_id]))
                 negative_samples = images1[self.negative_batch_idx[batch_id]]
                     #negative_samples = images1[self.negative_batch_idx[batch_id]]
                 #negative_samples = NegSamplerRandomly(images1)
 
             with torch.cuda.amp.autocast():
-                neg_batch= self.model(negative_samples)
+                neg_batch, neg_batch_patch= self.model(negative_samples)
                 pos_samples = positive_transform(images1)
-                pos_batch= self.model(pos_samples)
-                anchor_batch= self.model(images0)
+                pos_batch, pos_batch_patch= self.model(pos_samples)
+                anchor_batch, anchor_batch_patch= self.model(images0)
                 masked_pos_samples= self.positive_masking_transform(pos_samples)
-                masked_pos_batch= self.model(masked_pos_samples).detach()
+                with torch.no_grad():
+                    masked_pos_batch, masked_pos_batch_patch= self.model(masked_pos_samples)
                     
 
                 # if masked_pos_batch_patch is not None:

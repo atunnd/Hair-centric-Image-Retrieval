@@ -92,12 +92,6 @@ def main(args):
     elif args.mode == "simclr":
         train_transform = SimCLRTransform(input_size=224)
         test_transform = SimCLRTransform(input_size=224)   
-        # if "vit" in str(args.model):
-        #     aug_args = type('', (), {})()
-        #     aug_args.input_size = args.size
-        #     aug_args.crop_min = args.crop_min
-        #     aug = DataAugmentationForSIMWithMask(aug_args)
-        #     train_transform = aug
     elif args.mode == "mae":
         train_transform = MAETransform(input_size=224)
         test_transform = MAETransform(input_size=224)
@@ -117,7 +111,7 @@ def main(args):
     if args.mode == "simclr_supcon":
         train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=TwoCropTransform(train_transform))
     else:
-        train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=train_transform, original_img_dir=args.img_dir_origin, our_method=args.neg_sample)
+        train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=train_transform)
 
     #test_dataset = CustomDataset(annotations_file=args.test_annotation, img_dir=args.img_dir, transform=test_transform)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
