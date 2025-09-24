@@ -832,10 +832,10 @@ class OriginSimCLR(nn.Module):
         self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
 
         #EMA backbone and projection head
-        # self.backbone_momentum = copy.deepcopy(self.backbone)
-        # self.projection_head_momentum = copy.deepcopy(self.projection_head)
-        # deactivate_requires_grad(self.backbone_momentum)
-        # deactivate_requires_grad(self.projection_head_momentum)
+        self.backbone_momentum = copy.deepcopy(self.backbone)
+        self.projection_head_momentum = copy.deepcopy(self.projection_head)
+        deactivate_requires_grad(self.backbone_momentum)
+        deactivate_requires_grad(self.projection_head_momentum)
 
     def forward(self, x):
         x = self.backbone(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
@@ -850,19 +850,19 @@ class OriginSimCLR(nn.Module):
             z = self.projection_head(x)
             return z, None
     
-    # def forward_momentum(self, x):
-    #     x = self.backbone_momentum(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
+    def forward_momentum(self, x):
+        x = self.backbone_momentum(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
         
-    #     if "vit" in str(self.model):
-    #         cls_token = x[:, 0, :]  # CLS token [batch, dim]
-    #         patch_token = x[:, 1:, :]
-    #         z = self.projection_head_momentum(cls_token)
-    #         return z, patch_token
+        if "vit" in str(self.model):
+            cls_token = x[:, 0, :]  # CLS token [batch, dim]
+            patch_token = x[:, 1:, :]
+            z = self.projection_head_momentum(cls_token)
+            return z, patch_token
             
-    #     else:
-    #         x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
-    #         z = self.projection_head_momentum(x)
-    #         return z, None
+        else:
+            x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
+            z = self.projection_head_momentum(x)
+            return z, None
     
     
     def extract_features(self, x):
@@ -982,3 +982,13 @@ class DINOv2(Module):
         cls_tokens = features[:, 0]
         masked_features = None if mask is None else features[mask]
         return cls_tokens, masked_features
+
+class ViTFeatureExtractor:
+    def __init__(self, model):
+        self.model = model
+        self.model.eval()
+
+    def extract_features(self, x):
+        with torch.no_grad():
+            features = self.model.forward_features(x)
+            return features[:, 0]  # CLS token
