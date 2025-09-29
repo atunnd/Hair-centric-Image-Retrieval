@@ -409,7 +409,10 @@ class Trainer:
                 nt_xent_loss = self.criterion(pos_batch, anchor_batch)
                 running_loss2 += nt_xent_loss.item()
 
-                mse_loss = F.mse_loss(pos_batch, masked_pos_batch, reduction='mean')
+                if "vit" in str(self.mode_model):
+                    mse_loss = F.mse_loss(pos_batch_patch, masked_pos_batch_patch, reduction='mean')
+                else:
+                    mse_loss = F.mse_loss(pos_batch, masked_pos_batch, reduction='mean')
                 running_loss3 += mse_loss.item()
                 
                 total_loss = nt_xent_loss + alpha*trip_loss + beta * mse_loss

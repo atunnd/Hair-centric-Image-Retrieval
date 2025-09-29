@@ -7,6 +7,16 @@ from torchvision.io import read_image
 import torch
 import torchvision.transforms as T
 
+knn_transform = transforms.Compose([
+    T.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+# knn_transform = transforms.Compose([
+#     transforms.Resize((224, 224)),
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+# ])
 
 positive_transform = T.Compose([
     T.RandomRotation(degrees=(-15, 15)),

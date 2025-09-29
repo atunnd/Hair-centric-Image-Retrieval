@@ -13,6 +13,7 @@ python knn_classification.py \
   --seed 42 \
   --num_workers 8 \
   --device cuda \
-  --batch_size 256
+  --batch_size 256 \
+  --eval_type linear_prob
 
     

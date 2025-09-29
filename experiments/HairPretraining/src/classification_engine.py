@@ -6,6 +6,7 @@ from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import numpy as np
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
 
 class Classifier:
     def __init__(self, model, train_loader, test_loader, args):
@@ -34,7 +35,9 @@ class Classifier:
         with torch.no_grad():
             for batch in tqdm(self.train_loader, desc="Extracting training features"):
                 images, labels = batch[0], batch[1]
-                x0= images[0]
+                #print("images: ", images.shape)
+                #print("label: ", labels.shape)
+                x0= images
                 x0 = x0.to(self.device)
                 training_features = self.model.extract_features(x0)
                 training_features = torch.nn.functional.normalize(training_features, dim=1)
@@ -44,7 +47,9 @@ class Classifier:
         with torch.no_grad():
             for batch in tqdm(self.test_loader, desc="Extracting testing features"):
                 images, labels = batch[0], batch[1]
-                x0 = images[0]
+                #print("images: ", images.shape)
+                #print("label: ", labels.shape)
+                x0 = images
                 x0 = x0.to(self.device)
                 testing_features = self.model.extract_features(x0)
                 testing_features = torch.nn.functional.normalize(testing_features, dim=1)
@@ -56,7 +61,7 @@ class Classifier:
         self.testing_features = torch.cat(self.testing_features)
         self.testing_labels = torch.cat(self.testing_labels)
 
-    def train(self, ks=(5, 10, 20, 27, 30, 40, 642)):
+    def knn_eval(self, ks=(5, 10, 20, 27, 30, 40, 642)):
         print(f"Evaluating on KNN classifier with {self.device}")
         self.extracting_features()
         file_path = os.path.join(self.save_path, "knn_evaluation_results.txt")
@@ -84,3 +89,32 @@ class Classifier:
 
             print(f"✅ Appended results for k={k}")
         print(f"\n📂 All results saved in: {file_path}")
+    
+    
+    def linear_probe_eval(self):
+        print(f"Evaluating with Linear Probe on {self.device}")
+        self.extracting_features()
+        file_path = os.path.join(self.save_path, "linear_probe_results.txt")
+
+        # Logistic regression (multi-class, one-vs-rest)
+        clf = LogisticRegression(
+            max_iter=5000, solver="lbfgs", multi_class="multinomial"
+        )
+        clf.fit(self.training_features, self.training_labels)
+        y_pred = clf.predict(self.testing_features)
+
+        acc = accuracy_score(self.testing_labels, y_pred)
+        report = classification_report(self.testing_labels, y_pred)
+        cm = confusion_matrix(self.testing_labels, y_pred)
+
+        with open(file_path, "w") as f:
+            f.write("Linear Probe Evaluation Results\n")
+            f.write("="*50 + "\n\n")
+            f.write(f"Accuracy: {acc:.4f}\n\n")
+            f.write("Classification Report:\n")
+            f.write(report + "\n\n")
+            f.write("Confusion Matrix:\n")
+            f.write(np.array2string(cm) + "\n\n")
+            f.write("="*50 + "\n\n")
+
+        print(f"✅ Linear probe results saved in: {file_path}")

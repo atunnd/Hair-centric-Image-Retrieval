@@ -645,73 +645,106 @@ from lightly.models.utils import (
     deactivate_requires_grad,
     update_momentum,
 )
+class ViTWrapper(nn.Module):
+    def __init__(self, weights=None):
+        super().__init__()
+        vit = torchvision.models.vit_b_16(weights=weights)
+        vit.heads = nn.Identity()  # bỏ classifier head
+        
+        self.conv_proj = vit.conv_proj
+        self.encoder = vit.encoder
+        self.cls_token = vit.class_token
+        self.pos_embedding = vit.encoder.pos_embedding
+
+    def forward(self, x):
+        n = x.shape[0]
+
+        # Patch embeddings
+        x = self.conv_proj(x)                # (n, 768, H/16, W/16)
+        x = x.flatten(2).transpose(1, 2)     # (n, num_patches, 768)
+
+        # Thêm CLS token
+        cls_tokens = self.cls_token.expand(n, -1, -1)  # (n, 1, 768)
+        x = torch.cat((cls_tokens, x), dim=1)          # (n, num_patches+1, 768)
+
+        # Thêm positional embeddings
+        x = x + self.pos_embedding[:, : x.size(1)]
+
+        # Encoder
+        x = self.encoder(x)  # (n, num_patches+1, 768)
+
+        # Tách ra
+        cls_token = x[:, 0]       # (n, 768)
+        patch_tokens = x[:, 1:]   # (n, num_patches, 768)
+
+        # Pooling patch tokens (trung bình)
+        pooled_patches = patch_tokens.mean(dim=1)  # (n, 768)
+
+        return cls_token, pooled_patches
 
 class OriginSimCLR(nn.Module):
-    def __init__(self, backbone=None, model=None):
+    def __init__(self, model="resnet18"):
         super().__init__()
         self.model = model
-        self.backbone=None
-        print("Using backbone: ", self.model)
-        
-        # Handle backbone: For ViT, wrap it
-        if "vit" in str(model):
-            vit = models.vit_b_16()  # Load full ViT if backbone is not already wrapped
-            self.backbone = ViTBackbone(vit)
-            proj_input_dim = 768  # For vit_b_16
-            output_dim = 512
+        print("Using backbone:", self.model)
+
+        if model == "resnet18":
+            backbone = torchvision.models.resnet18(weights=None)
+            self.backbone = nn.Sequential(*list(backbone.children())[:-1])
+            proj_input_dim, output_dim = 512, 128
+
+        elif model == "resnet50":
+            backbone = torchvision.models.resnet50(weights=None)
+            self.backbone = nn.Sequential(*list(backbone.children())[:-1])
+            proj_input_dim, output_dim = 2048, 1024
+
+        elif model == "vit_b_16":
+            vit = ViTWrapper(weights=None)
+            self.backbone = vit
+            proj_input_dim, output_dim = 768, 512
+
         else:
-            if model == "resnet18":
-                backbone = torchvision.models.resnet18()
-                self.backbone = nn.Sequential(*list(backbone.children())[:-1])
-                proj_input_dim = 512
-                output_dim=128
-            elif model == "resnet50":
-                backbone = torchvision.models.resnet50()
-                self.backbone = nn.Sequential(*list(backbone.children())[:-1])
-                proj_input_dim = 2048
-                output_dim=1024
-            else:
-                raise ValueError("Unsupported model")
-        
+            raise ValueError(f"Unsupported model: {model}")
+
         self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
 
-        #EMA backbone and projection head
+        # momentum encoder
         self.backbone_momentum = copy.deepcopy(self.backbone)
         self.projection_head_momentum = copy.deepcopy(self.projection_head)
         deactivate_requires_grad(self.backbone_momentum)
         deactivate_requires_grad(self.projection_head_momentum)
 
     def forward(self, x):
-        x = self.backbone(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
-        
-        if "vit" in str(self.model):
-            cls_token = x[:, 0, :]  # CLS token [batch, dim]
-            patch_token = x[:, 1:, :]
+        if "vit" in self.model:
+            # option A: only CLS token
+            cls_token, pooled_patch = self.backbone(x)
             z = self.projection_head(cls_token)
-            return z, patch_token
-        else:
-            x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
+            return z, pooled_patch
+
+        else:  # ResNet
+            x = self.backbone(x)                # [batch, feat, 1, 1]
+            x = x.flatten(start_dim=1)          # [batch, feat]
             z = self.projection_head(x)
             return z, None
-    
+
     def forward_momentum(self, x):
-        x = self.backbone_momentum(x)  # ResNet: [batch, features, 1, 1]; ViT: [batch, seq_len, dim]
-        
-        if "vit" in str(self.model):
-            cls_token = x[:, 0, :]  # CLS token [batch, dim]
-            patch_token = x[:, 1:, :]
+        if "vit" in self.model:
+            cls_token, pooled_patch = self.backbone_momentum(x)   
             z = self.projection_head_momentum(cls_token)
-            return z, patch_token
-            
+            return z, pooled_patch
         else:
-            x = x.flatten(start_dim=1)  # For CNN like ResNet [batch, features]
+            x = self.backbone_momentum(x)
+            x = x.flatten(start_dim=1)
             z = self.projection_head_momentum(x)
             return z, None
-    
-    
+
     def extract_features(self, x):
-        x = self.backbone(x).flatten(start_dim=1)
-        return x
+        if "vit" in self.model:
+            cls_token, _ = self.backbone(x)
+            return cls_token
+        else:
+            return self.backbone(x).flatten(start_dim=1)
+
         
 
 import copy

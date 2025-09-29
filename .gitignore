@@ -18,10 +18,18 @@ __pycache__/
 /benchmark_processing
 /experiments/HairPretraining/output_dir
 /experiments/HairPretraining/classification_output_dir
+/experiments/HairPretraining/classification_output_dir_Figaro
+/experiments/HairPretraining/classification_output_dir_celebA
+/experiments/HairPretraining/data/figaro_testing.csv
+/experiments/HairPretraining/data/figaro_training.csv
 /experiments/HairPretraining/dino
 /experiments/HairPretraining/dinov3
 /experiments/HairPretraining/weights
 /Siamese-Image-Modeling
+/experiments/HairPretraining/check_var.ipynb
+/experiments/HairPretraining/classification_output_dir_celebA
+/experiments/HairPretraining/classification_output_dir_Figaro
+/experiments/HairPretraining/classification_output_dir_K-hairstyle
 
 # Model files
 *.pt

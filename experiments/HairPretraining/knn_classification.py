@@ -4,7 +4,7 @@ from src.classification_engine import Classifier
 from utils.utils import set_seed
 import yaml
 import os
-from utils.transform import get_test_transform, get_train_transform, TwoCropTransform, get_siaMIM_transform, DataAugmentationForSIM
+from utils.transform import knn_transform
 from utils.dataloader import CustomDataset
 import torch
 from torch.utils.data import DataLoader
@@ -63,7 +63,7 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=4)
 
     # ViT settings
-    parser.add_argument('--fusion_type', default="mlp", type=str, choices=["mlp", "transformer"])
+    parser.add_argument('--eval_type', default=None, type=str, choices=["knn", "linear_prob"])
 
     
     return parser.parse_args()
@@ -81,35 +81,40 @@ def merge_config_with_args(args):
 def main(args):
 
     
-    if args.mode == "simclr_supcon":
-        mean = (0.5071, 0.4867, 0.4408) # cifar100
-        std = (0.2675, 0.2565, 0.2761)
-        train_transform = get_train_transform(args.size, mean, std)
-        test_transform = get_test_transform(args.size, mean, std)
-    elif args.mode == "simclr" or args.mode=="our":
-        train_transform = SimCLRTransform(input_size=224)
-        test_transform = SimCLRTransform(input_size=224)   
-    elif args.mode == "mae":
-        train_transform = MAETransform(input_size=224)
-        test_transform = MAETransform(input_size=224)
-    elif args.mode == "dinov2":
-        train_transform = DINOTransform()
-        test_transform = DINOTransform()
-    elif args.mode == "simMIM":
-        train_transform = MAETransform(input_size=224)
-        test_transform = MAETransform(input_size=224)
-    elif args.mode == "siaMIM":
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
-        ckpt_args = state_dict["args"]
-        train_transform = DataAugmentationForSIM(args=ckpt_args)
-        test_transform = DataAugmentationForSIM(args=ckpt_args)
+    # if args.mode == "simclr_supcon":
+    #     mean = (0.5071, 0.4867, 0.4408) # cifar100
+    #     std = (0.2675, 0.2565, 0.2761)
+    #     train_transform = get_train_transform(args.size, mean, std)
+    #     test_transform = get_test_transform(args.size, mean, std)
+    # elif args.mode == "simclr" or args.mode=="our":
+    #     train_transform = SimCLRTransform(input_size=224)
+    #     test_transform = SimCLRTransform(input_size=224)   
+    # elif args.mode == "mae":
+    #     train_transform = MAETransform(input_size=224)
+    #     test_transform = MAETransform(input_size=224)
+    # elif args.mode == "dinov2":
+    #     train_transform = DINOTransform()
+    #     test_transform = DINOTransform()
+    # elif args.mode == "simMIM":
+    #     train_transform = MAETransform(input_size=224)
+    #     test_transform = MAETransform(input_size=224)
+    # elif args.mode == "siaMIM":
+    #     state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+    #     ckpt_args = state_dict["args"]
+    #     train_transform = DataAugmentationForSIM(args=ckpt_args)
+    #     test_transform = DataAugmentationForSIM(args=ckpt_args)
 
-    if args.mode == "simclr_supcon":
-        train_dataset = CustomDataset(args.train_annotation, args.img_dir, TwoCropTransform(train_transform))
-    else:
-        train_dataset = CustomDataset(args.train_annotation, args.img_dir, train_transform)
+    # if args.mode == "simclr_supcon":
+    #     train_dataset = CustomDataset(args.train_annotation, args.img_dir, TwoCropTransform(train_transform))
+    # else:
+    #     train_dataset = CustomDataset(args.train_annotation, args.img_dir, train_transform)
 
+    train_transform=knn_transform
+    test_transform=knn_transform
+    
+    train_dataset = CustomDataset(args.train_annotation, args.img_dir, train_transform)
     test_dataset = CustomDataset(args.test_annotation, args.img_dir, test_transform)
+    
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
                               shuffle=True, num_workers = args.num_workers)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, 
@@ -117,39 +122,39 @@ def main(args):
     
     if args.mode == "simclr_supcon":
         model = SupConResNet(name=args.model, feat_dim=args.classes)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
 
     elif args.mode == "simclr":
         model = SimCLR(model=args.model)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
     
     elif args.mode == "our":
         model = OriginSimCLR(model=args.model)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
 
     elif args.mode == "mae":
         vit = vit_base_patch16_224()
         model = MAE(vit)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
     
     elif args.mode == "dinov2":
         model = DINOv2()
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
 
     elif args.mode == "simMIM":
         vit = torchvision.models.vit_b_16(pretrained=False)
         model = SimMIM(vit)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
         
@@ -165,7 +170,10 @@ def main(args):
         print("✅ Model weights loaded!")
 
     trainer = Classifier(model, train_loader, test_loader, args)
-    trainer.train()
+    if args.eval_type == "knn":
+        trainer.knn_eval()
+    elif args.eval_type == "linear_prob":
+        trainer.linear_probe_eval()
 
 if __name__ == "__main__":
     args = parse_args()
