@@ -18,8 +18,8 @@ class Classifier:
         self.mode_model = args.model
         self.device = args.device
 
-        if args.our_method:
-            self.save_path = os.path.join(args.save_path, f"our_method_{self.mode}_{self.mode_model}")
+        if args.mode == "SHAM":
+            self.save_path = os.path.join(args.save_path, f"{self.mode}_{self.mode_model}_{args.SHAM_mode}")
         else:
             self.save_path = os.path.join(args.save_path, f"{self.mode}_{self.mode_model}")
         os.makedirs(self.save_path, exist_ok=True)

@@ -160,16 +160,19 @@ class SHAM(nn.Module):
         cls_token = x_encoded[:, 0]
 
         if self.mode == "embedding": # output patches included visable tokens + masked tokens
-          visable_tokens = utils.get_at_index(x_encoded, idx_keep)
-          masked_tokens = utils.get_at_index(x_encoded, idx_mask) # masked tokens
+            if idx_keep is not None and idx_mask is not None:
+                visable_tokens = utils.get_at_index(x_encoded, idx_keep)
+                masked_tokens = utils.get_at_index(x_encoded, idx_mask) # masked tokens
+            else:
+                visable_tokens = x_encoded[:, 1:]
         elif self.mode == "reconstruction":
           visable_tokens = x_encoded[:, 1:]
 
         patch_tokens = x_encoded[:, 1:]
           
-        # if self.pooling == "mean":
-        #     pooled = visable_tokens.mean(dim=1) # global contrastive 
-        pooled=cls_token
+        if self.pooling == "mean":
+            pooled = visable_tokens.mean(dim=1) # global contrastive 
+        #pooled=cls_token
 
         #patch_tokens = patch_tokens.mean(dim=1)
 
@@ -184,9 +187,9 @@ class SHAM(nn.Module):
         cls_token = x_encoded[:, 0]
         patch_tokens = x_encoded[:, 1:]
 
-        # if self.pooling == "mean":
-        #     pooled = patch_tokens.mean(dim=1) # global contrastive 
-        pooled=cls_token
+        if self.pooling == "mean":
+            pooled = patch_tokens.mean(dim=1) # global contrastive 
+        #pooled=cls_token
 
         #patch_tokens = patch_tokens.mean(dim=1)
 
@@ -253,12 +256,12 @@ class SHAM(nn.Module):
 
         # ---------- Cross Alignemnt between Student and Teacher ---------
         # Add positional embeddings
-        x_pred_s  = x_pred_s  + self.pos_map(self.backbone.vit.pos_embed[:, 1:, :])
-        patch_t = patch_t + self.teacher_backbone.vit.pos_embed[:, 1:, :]
+        #x_pred_s  = x_pred_s  + self.pos_map(self.backbone.vit.pos_embed[:, 1:, :])
+        #patch_t = patch_t + self.teacher_backbone.vit.pos_embed[:, 1:, :]
 
         # Cross-alignment
-        x_pred_s_refined = self.cross_align(x_pred_s, patch_t)
-        student_local = self.proj_local(x_pred_s_refined) 
+        #x_pred_s_refined = self.cross_align(x_pred_s, patch_t)
+        student_local = self.proj_local(x_pred_s) 
 
         return {
                 "global_s": student_global,
@@ -268,6 +271,11 @@ class SHAM(nn.Module):
                 "idx_keep": idx_keep_patches,
                 "idx_mask": idx_mask_patches,
             }
+    
+    def extract_features(self, images):
+        x_encoded, cls_token, pooled, patch_tokens = self.forward_encoder(images)
+        print("=>> pooled: ", pooled.shape)
+        return pooled
 
     def merge_visible_and_masked(self, patch_vis, patch_mask, idx_keep, idx_mask, N_total):
         """

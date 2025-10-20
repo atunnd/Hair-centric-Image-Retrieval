@@ -32,6 +32,7 @@ from sklearn.metrics import (
     log_loss
 )
 from functools import partial
+from src.main_backbone import SHAM
 
 class LayerNorm(nn.LayerNorm):
 
@@ -51,11 +52,11 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
 
     # Model option
-    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'siaMIM', "our"])
+    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'siaMIM', "SHAM"])
     parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50', "vit_b_16"])
     parser.add_argument('--checkpoint_path', type=str, default=None)
     parser.add_argument('--device', type=str, default='cuda', help='Device to use: cuda or cpu')
-    parser.add_argument('--our_method', type=bool, default=False)
+    parser.add_argument('--SHAM_mode', type=str, default="embedding", choices=['embedding', 'reconstruction'])
 
     # Optional config
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
@@ -132,10 +133,10 @@ def main(args):
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
     
-    elif args.mode == "our":
-        model = OriginSimCLR(model=args.model)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
-        model.load_state_dict(state_dict)
+    elif args.mode == "SHAM":
+        model = SHAM(mode=args.SHAM_mode, vit=vit_base_patch16_224())
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        model.load_state_dict(state_dict['model_state_dict'])
         print("✅ Model weights loaded!")
 
     elif args.mode == "mae":
