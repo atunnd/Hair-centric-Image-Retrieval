@@ -265,27 +265,26 @@ class SHAM(nn.Module):
         """
         patch_vis: [B, N_vis, D]
         patch_mask: [B, N_mask, D]
-        idx_keep: [B, N_vis] (long)
-        idx_mask: [B, N_mask] (long)
+        idx_keep: [B, N_vis]
+        idx_mask: [B, N_mask]
         N_total: tổng số patch ban đầu (H_p * W_p)
         """
         B, D = patch_vis.shape[0], patch_vis.shape[-1]
         device = patch_vis.device
 
-        #print(f"Merging {idx_keep.shape[1] + idx_mask.shape[1]} tokens")
-        #print(f"min idx keep: {idx_keep.min()}, max idx keep: {idx_keep.max()}")
-        #print(f"min idx mask: {idx_mask.min()}, max idx mask: {idx_mask.max()}")
-        
-        # tensor chứa kết quả
+        # Ép dtype của 2 patch về cùng kiểu
+        if patch_vis.dtype != patch_mask.dtype:
+            patch_mask = patch_mask.to(patch_vis.dtype)
+
         merged = torch.zeros(B, N_total, D, device=device, dtype=patch_vis.dtype)
-        
-        # ghép visible patch vào vị trí đúng
+
+        # Chèn visible patches
         merged.scatter_(1, idx_keep.unsqueeze(-1).expand(-1, -1, D), patch_vis)
-        
-        # ghép masked patch vào vị trí đúng
+        # Chèn masked patches
         merged.scatter_(1, idx_mask.unsqueeze(-1).expand(-1, -1, D), patch_mask)
-        
-        return merged  # [B, N_total, D]
+
+        return merged
+
 
     
 
