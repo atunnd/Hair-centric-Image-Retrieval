@@ -135,7 +135,7 @@ def main(args):
     
     elif args.mode == "SHAM":
         model = SHAM(mode=args.SHAM_mode, vit=vit_base_patch16_224())
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
         model.load_state_dict(state_dict['model_state_dict'])
         print("✅ Model weights loaded!")
 

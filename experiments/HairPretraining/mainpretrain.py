@@ -125,7 +125,7 @@ def main(args):
         else:
             train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=train_transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                             shuffle=True, num_workers = args.num_workers, drop_last=False)
     
     if args.mode == "simclr_supcon":

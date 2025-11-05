@@ -79,7 +79,7 @@ class Trainer:
         elif self.mode == "simMIM":
             self.criterion = nn.L1Loss()
         elif self.mode == "SHAM":
-            self.criterion1 = NTXentLoss(temperature=args.loss_temp)
+            self.criterion1 = NTXentLoss(temperature=0.5)
             self.criterion2 = positive_consistency_loss_margin
             self.criterion3 = bidirectional_margin_loss
             self.criterion4 = nn.MSELoss()
@@ -147,7 +147,7 @@ class Trainer:
             self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_{self.args.SHAM_mode}")    
         else: 
             self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
-        if not os.path.exists(self.save_path):
+        if not os.path.exists(self.save_path) and self.args.continue_training is False:
             print(f"Save {args.mode} at {self.save_path}")      
             os.makedirs(self.save_path, exist_ok=True)
             new_log=True
@@ -393,7 +393,7 @@ class Trainer:
         X_np = X.detach().cpu().numpy().astype('float32')
         D = X_np.shape[1]
         use_gpu = faiss.get_num_gpus() > 0
-        kmeans = faiss.Kmeans(d=D, k=K, niter=50, gpu=use_gpu, verbose=True)
+        kmeans = faiss.Kmeans(d=D, k=K, niter=50, gpu=False, verbose=False)
         kmeans.train(X_np)
         centroids = torch.from_numpy(kmeans.centroids).to(X.device)
         return centroids, kmeans
@@ -461,24 +461,28 @@ class Trainer:
                 embedding_anchor, embedding_pos1, embedding_pos2, masked_prediction, masked_GT = res['anchor'], res['pos1'], res['pos2'], res['masked_prediction'], res['masked_GT']
                 
                 if (epoch + 1) >= self.warm_up_epochs:
-                    embedding_hard_negative = sample_random_hard_negatives(embedding_anchor)
-                    self.hard_negative_memory = embedding_hard_negative
-                else:
                     if (epoch+1 - self.warm_up_epochs) % self.sampling_frequency == 0:
-                        K, m_star = self.estimate_K_by_PCA(embedding_anchor)
+                        #K, m_star = self.estimate_K_by_PCA(embedding_anchor)
+                        K=5
                         centroids, kmeans = self.run_kmeans(embedding_anchor, K)
                         embedding_hard_negative = self.mine_hard_negatives(embedding_anchor, centroids, kmeans)
-                        self.hard_negative_memory = embedding_hard_negative
-                        print(f"Estimated K = {K} (m* = {m_star})")
+                        self.hard_negative_memory[batch_id] = embedding_hard_negative
+                        #print(f"Estimated K = {K} (m* = {m_star})")
                     else:
-                        embedding_hard_negative = self.hard_negative_memory
+                        embedding_hard_negative = self.hard_negative_memory[batch_id]
+                else:
+                    embedding_hard_negative = sample_random_hard_negatives(embedding_anchor)
+                    if epoch == 0:
+                        self.hard_negative_memory.append(embedding_hard_negative)
+                    else:
+                        self.hard_negative_memory[batch_id] = embedding_hard_negative
                 
                 contrastive_loss = self.criterion1(embedding_anchor, embedding_pos1) # contrastive loss
                 pos_consistency_loss = self.criterion2(embedding_pos1, embedding_pos2) # Positive–positive consistency loss
                 bidirectional_margin_loss = self.criterion3(embedding_anchor, embedding_pos1, embedding_pos2, embedding_hard_negative) 
                 reconstruction_loss = self.criterion4(masked_prediction, masked_GT) 
                 
-                total_loss = 0.5*contrastive_loss + 0.5*reconstruction_loss + 0.3*bidirectional_margin_loss + 0.1*pos_consistency_loss
+                total_loss = contrastive_loss + 0.5*reconstruction_loss + 0.3*bidirectional_margin_loss + 0.1*pos_consistency_loss
             
             running_loss_total += total_loss.item()
             running_loss_contrastive += contrastive_loss.item()
