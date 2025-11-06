@@ -56,7 +56,7 @@ class Trainer:
         self.scaler = torch.cuda.amp.GradScaler() 
         
         # memory for hard negative
-        self.hard_negative_memory = []
+        self.hard_negative_memory =  [torch.empty(0) for _ in range(len(self.train_loader))]
         self.warm_up_epochs = args.warm_up_epochs
         self.sampling_frequency = args.sampling_frequency
 
@@ -388,16 +388,15 @@ class Trainer:
     # -----------------------------
     # Step 2. K-Means clustering
     # -----------------------------
-    def run_kmeans(self, X: torch.Tensor, K: int):
-        """Chạy K-means bằng FAISS, trả về centroids tensor"""
-        X_np = X.detach().cpu().numpy().astype('float32')
-        D = X_np.shape[1]
-        use_gpu = faiss.get_num_gpus() > 0
-        kmeans = faiss.Kmeans(d=D, k=K, niter=50, gpu=False, verbose=False)
-        kmeans.train(X_np)
-        centroids = torch.from_numpy(kmeans.centroids).to(X.device)
+    def run_kmeans(self, X: torch.Tensor, K: int, device_id: int = 0):
+        """Chạy K-means bằng FAISS, trả về centroids tensor""" 
+        X_np = X.detach().cpu().numpy().astype('float32') 
+        D = X_np.shape[1] 
+        use_gpu = faiss.get_num_gpus() > 0 
+        kmeans = faiss.Kmeans(d=D, k=K, niter=50, gpu=use_gpu, verbose=False) 
+        kmeans.train(X_np) 
+        centroids = torch.from_numpy(kmeans.centroids).to(X.device) 
         return centroids, kmeans
-
 
     # -----------------------------
     # Step 3. Hard negative mining (cluster-based)
@@ -464,7 +463,7 @@ class Trainer:
                     if (epoch+1 - self.warm_up_epochs) % self.sampling_frequency == 0:
                         #K, m_star = self.estimate_K_by_PCA(embedding_anchor)
                         K=5
-                        centroids, kmeans = self.run_kmeans(embedding_anchor, K)
+                        centroids, kmeans = self.run_kmeans(embedding_anchor, K, self.device_id)
                         embedding_hard_negative = self.mine_hard_negatives(embedding_anchor, centroids, kmeans)
                         self.hard_negative_memory[batch_id] = embedding_hard_negative
                         #print(f"Estimated K = {K} (m* = {m_star})")
@@ -472,10 +471,10 @@ class Trainer:
                         embedding_hard_negative = self.hard_negative_memory[batch_id]
                 else:
                     embedding_hard_negative = sample_random_hard_negatives(embedding_anchor)
-                    if epoch == 0:
-                        self.hard_negative_memory.append(embedding_hard_negative)
-                    else:
-                        self.hard_negative_memory[batch_id] = embedding_hard_negative
+                    # if epoch == 0:
+                    #     self.hard_negative_memory.append(embedding_hard_negative)
+                    # else:
+                    self.hard_negative_memory[batch_id] = embedding_hard_negative
                 
                 contrastive_loss = self.criterion1(embedding_anchor, embedding_pos1) # contrastive loss
                 pos_consistency_loss = self.criterion2(embedding_pos1, embedding_pos2) # Positive–positive consistency loss

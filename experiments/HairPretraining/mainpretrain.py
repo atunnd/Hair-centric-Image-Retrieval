@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument('--temp', type=float, default=0.5, help="temperature for loss function")
 
     # Model option
-    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'SHAM'])
+    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'SHAM', 'S2R2'])
     parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50', "vit_b_16"])
     parser.add_argument("--SHAM_mode", type=str, default="embedding", choices = ['reconstruction', 'embedding'])
 
@@ -62,6 +62,9 @@ def parse_args():
     parser.add_argument('--warm_up_epochs', default=20, type=int, help='Number of warmup epochs for negative sampling')
     parser.add_argument('--sampling_frequency', type=int, default=30, help="Frequency to sample hard negative")
     parser.add_argument('--ema', type=float, default=0.99)
+    
+    # retrieval setting
+    parser.add_argument('--S2R2', action="store_true", help="Adding S2R2 regularization")
 
     # supcon setting
     parser.add_argument('--classes', default=128, type=int, help="Classes for sup con")
