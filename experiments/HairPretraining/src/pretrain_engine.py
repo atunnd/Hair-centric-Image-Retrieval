@@ -512,9 +512,6 @@ class Trainer:
                 total_loss, contrastive_loss, pos_consistency_loss,
                 bidirectional_margin_loss, reconstruction_loss
             )
-
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
         
         self.writer.add_scalar('Epoch/Current', epoch, global_step=epoch)
         self.writer.add_scalars(
