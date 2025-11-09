@@ -77,7 +77,17 @@ class SHAM(nn.Module):
             decoder_dim = decoder_dim
 
         # ========== Decoder ==========
-        self.decoder = MAEDecoderTIMM(
+        self.pixel_decoder = MAEDecoderTIMM(
+            num_patches=vit.patch_embed.num_patches,
+            patch_size=self.patch_size,
+            embed_dim=embed_dim,
+            decoder_embed_dim=decoder_dim,
+            decoder_depth=8,
+            decoder_num_heads=8,
+            mlp_ratio=4.0,
+        )
+        
+        self.embedding_decoder = MAEDecoderTIMM(
             num_patches=vit.patch_embed.num_patches,
             patch_size=self.patch_size,
             embed_dim=embed_dim,
@@ -89,12 +99,6 @@ class SHAM(nn.Module):
 
         self.proj_head = ProjectionHead(input_dim=embed_dim)
 
-        # ========== Optional Attention Pooling ==========
-        if pooling == "attention":
-            self.att_pool = nn.MultiheadAttention(
-                embed_dim=embed_dim, num_heads=8, batch_first=True
-            )
-
         # ========== EMA Teacher ==========
         self.teacher_backbone = copy.deepcopy(self.backbone)
         self.teacher_proj_head = copy.deepcopy(self.proj_head)
@@ -105,9 +109,6 @@ class SHAM(nn.Module):
         ):
             p.requires_grad = False
 
-        self.teacher_backbone.eval()
-        self.teacher_proj_head.eval()
-
 
     # ---------------- Encoder ----------------
     def forward_encoder(self, images, idx_keep=None):
@@ -116,23 +117,41 @@ class SHAM(nn.Module):
     def forward_encoder_teacher(self, images, idx_keep=None):
         return self.teacher_backbone.encode(images=images, idx_keep=idx_keep)
 
-    # ---------------- Decoder ----------------
-    def forward_decoder(self, x_encoded, idx_keep, idx_mask):
+    # ---------------- Pixel Decoder ----------------
+    def forward_pixel_decoder(self, x_encoded, idx_keep, idx_mask):
         # build decoder input
         batch_size = x_encoded.shape[0]
-        x_decode = self.decoder.embed(x_encoded)
+        x_decode = self.pixel_decoder.embed(x_encoded)
         x_masked = utils.repeat_token(
-            self.decoder.mask_token, (batch_size, self.sequence_length)
+            self.pixel_decoder.mask_token, (batch_size, self.sequence_length)
         )
         x_masked = utils.set_at_index(x_masked, idx_keep, x_decode.type_as(x_masked))
 
         # decoder forward pass
-        x_decoded = self.decoder.decode(x_masked)
+        x_decoded = self.pixel_decoder.decode(x_masked)
 
         # predict pixel values for masked tokens
         x_pred = utils.get_at_index(x_decoded, idx_mask)
-        x_pred = self.decoder.predict(x_pred)
-        return x_decoded, x_pred
+        x_pred = self.pixel_decoder.predict(x_pred)
+        return x_pred
+
+    # ---------------- Embedding Decoder ----------------
+    def forward_embedding_decoder(self, x_encoded, idx_keep, idx_mask):
+        # build decoder input
+        batch_size = x_encoded.shape[0]
+        x_decode = self.embedding_decoder.embed(x_encoded)
+        x_masked = utils.repeat_token(
+            self.embedding_decoder.mask_token, (batch_size, self.sequence_length)
+        )
+        x_masked = utils.set_at_index(x_masked, idx_keep, x_decode.type_as(x_masked))
+
+        # decoder forward pass
+        x_decoded = self.embedding_decoder.decode(x_masked)
+
+        # predict pixel values for masked tokens
+        x_pred = utils.get_at_index(x_decoded, idx_mask)
+        x_pred = self.embedding_decoder.predict(x_pred)
+        return x_pred
 
     # ---------------- Full Forward ----------------
     def forward(self, img_anchor, img_pos1, img_pos2):
@@ -145,10 +164,13 @@ class SHAM(nn.Module):
         
         # ----- forward anchor ------
         x_encoded = self.forward_encoder(images=img_anchor, idx_keep=idx_keep)
-        x_embedding, x_pred = self.forward_decoder(
+        x_pred_pixel = self.forward_pixel_decoder(
             x_encoded=x_encoded, idx_keep=idx_keep, idx_mask=idx_mask
         )
-        anchor_embedding = self.proj_head(x_embedding[:, 1:].mean(dim=1))
+        x_pred_pixel = self.forward_embedding_decoder(
+            x_encoded=x_encoded, idx_keep=idx_keep, idx_mask=idx_mask
+        )
+        anchor_embedding = self.proj_head(x_pred_pixel[:, 1:, :].mean(dim=1))
 
         # get image patches for masked tokens
         patches = utils.patchify(img_anchor, self.patch_size)
@@ -157,12 +179,12 @@ class SHAM(nn.Module):
         
         # ------ forward pos1 ------
         pos_encoded_1 = self.forward_encoder(images=img_pos1, idx_keep=None)
-        pos1_embedding = self.proj_head(pos_encoded_1[:, 1:].mean(dim=1))
+        pos1_embedding = self.proj_head(pos_encoded_1[:, 1:, :].mean(dim=1))
         
         # ------ forward pos2 ------
         with torch.no_grad():
             pos_encoded_2 = self.forward_encoder_teacher(images=img_pos2, idx_keep=None)
-            pos2_embedding = self.teacher_proj_head(pos_encoded_2[:, 1:].mean(dim=1))
+            pos2_embedding = self.teacher_proj_head(pos_encoded_2[:, 1:, :].mean(dim=1))
         
         return {
             "anchor": anchor_embedding,
@@ -762,9 +784,8 @@ class MAEDecoderTIMM(Module):
         """
 
         out = self.embed(input)
-        embedding = self.decode(out)
-        prediction = self.predict(embedding)
-        return embedding, prediction
+        out = self.decode(out)
+        return self.predict(out)
 
     def embed(self, input: Tensor) -> Tensor:
         """Embeds encoded input tokens into decoder token dimension.
