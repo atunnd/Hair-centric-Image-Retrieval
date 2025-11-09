@@ -77,105 +77,6 @@ from lightly.models.utils import (
 )
 
 import torchvision
-
-
-class AttentionPooling(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=8, batch_first=True)
-
-    def forward(self, x):  # x: [batch, seq_len, dim]
-        # Use CLS as query, patches as key/value
-        query = x[:, :1, :]  # [batch, 1, dim]
-        key_value = x[:, 1:, :]  # [batch, num_patches, dim]
-        attn_output, attn_weights = self.attn(query, key_value, key_value, need_weights=True)
-        # attn_weights: [batch, 1, num_patches]
-        return attn_output.squeeze(1), attn_weights.squeeze(1)  # [batch, dim], [batch, num_patches]
-
-# Custom ViT backbone with SVF integrated
-class ViTBackbone(nn.Module):
-    def __init__(self, vit_model, k=100):  # k for top-k in SVF
-        super().__init__()
-        self.conv_proj = vit_model.conv_proj
-        self.class_token = vit_model.class_token
-        self.pos_embed = vit_model.encoder.pos_embedding
-        self.dropout = vit_model.encoder.dropout
-        self.encoder_layers = vit_model.encoder.layers  # List of transformer layers
-        self.final_ln = vit_model.encoder.ln  # Final LayerNorm
-        self.num_layers = len(self.encoder_layers)
-        self.k = k  # Top-k for SVF
-        self.hidden_dim = vit_model.hidden_dim
-        self.token_importance_gen = nn.Linear(self.hidden_dim, 1)  # Ω for Z in SVF
-
-    def forward(self, x):
-        # Patch embedding
-        x = self.conv_proj(x)
-        x = x.flatten(2).transpose(1, 2)  # [batch, num_patches, embed_dim]
-        
-        # Add CLS token
-        cls_token = self.class_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((cls_token, x), dim=1)
-        
-        # Add positional embedding
-        x = x + self.pos_embed
-        
-        # Dropout
-        x = self.dropout(x)
-        
-        # Apply encoder layers up to penultimate
-        for i in range(self.num_layers - 1):
-            x = self.encoder_layers[i](x)
-        
-        # SVF at penultimate layer
-        penultimate_layer = self.encoder_layers[-2]
-        # To get attn_weights, call self-attn (assuming standard ViT layer with self_attention)
-        self_attn = penultimate_layer.self_attention  # Adjust if layer structure differs
-        attn_output, attn_weights = self_attn(query=x, key=x, value=x, need_weights=True, average_attn_weights=False)  # attn_weights [batch, num_heads, seq_len, seq_len]
-        
-        # Extract CLS attention to patches: A [batch, num_heads, num_patches]
-        A = attn_weights[:, :, 0, 1:]  # CLS query to patches
-        
-        # Aggregate heads: Â = sum over heads
-        A_hat = A.sum(dim=1)  # [batch, num_patches]
-        
-        # Token importance Z = sigmoid(Ω(E_i)), E_i are patches from x[:, 1:, :]
-        patches = x[:, 1:, :]  # [batch, num_patches, dim]
-        Z = torch.sigmoid(self.token_importance_gen(patches)).squeeze(-1)  # [batch, num_patches]
-        
-        # O = Â ⊕ (Â ⊗ Z)
-        O = A_hat + (A_hat * Z)  # [batch, num_patches]
-        
-        # Top-k indices based on O
-        _, top_indices = O.topk(self.k, dim=1, sorted=False)  # [batch, k]
-        
-        top_indices = top_indices.long()  # Ensure dtype for gather
-        
-        # Gather top-k patches
-        top_patches = torch.gather(patches, 1, 
-                                  top_indices.unsqueeze(-1).expand(-1, -1, self.hidden_dim))  # [batch, k, 768]
-        
-        # Gather positional embeddings for top-k patches
-        cls_pos = self.pos_embed[:, :1, :]  # [1, 1, 768]
-        # Fix: Expand pos_embed để match batch size trước khi gather
-        pos_embed_expanded = self.pos_embed.expand(x.shape[0], -1, -1)[:, 1:, :]  # [batch, 196, 768]
-        top_pos = torch.gather(pos_embed_expanded, 1, 
-                              top_indices.unsqueeze(-1).expand(-1, -1, self.hidden_dim))  # [batch, k, 768]
-        input_last_layer_pos = torch.cat([cls_pos.expand(x.shape[0], -1, -1), top_pos], dim=1)  # [batch, 1+k, 768]
-        
-        # New sequence for last layer: CLS + top-k patches
-        cls_token = x[:, 0, :].unsqueeze(1)  # [batch, 1, 768]
-        input_last_layer = torch.cat([cls_token, top_patches], dim=1)  # [batch, 1+k, 768]
-        input_last_layer = input_last_layer + input_last_layer_pos  # Add pos_embed
-        
-        # Apply last layer
-        x = self.encoder_layers[-1](input_last_layer)  # [batch, 1+k, 768]
-        
-        # Final LN
-        x = self.final_ln(x)
-        
-        return x, top_patches  # [batch, 1+k, 768]
-
-
 import torch
 import torch.nn as nn
 import copy
@@ -633,7 +534,7 @@ class ViTWrapper(nn.Module):
 
         return cls_token, pooled_patches
 
-class OriginSimCLR(nn.Module):
+class SimCLR(nn.Module):
     def __init__(self, model="resnet18"):
         super().__init__()
         self.model = model
@@ -659,42 +560,14 @@ class OriginSimCLR(nn.Module):
 
         self.projection_head = SimCLRProjectionHead(proj_input_dim, proj_input_dim, output_dim)
 
-        # momentum encoder
-        self.backbone_momentum = copy.deepcopy(self.backbone)
-        self.projection_head_momentum = copy.deepcopy(self.projection_head)
-        deactivate_requires_grad(self.backbone_momentum)
-        deactivate_requires_grad(self.projection_head_momentum)
-
     def forward(self, x):
-        if "vit" in self.model:
-            # option A: only CLS token
-            cls_token, pooled_patch = self.backbone(x)
-            z = self.projection_head(cls_token)
-            return z, pooled_patch
-
-        else:  # ResNet
-            x = self.backbone(x)                # [batch, feat, 1, 1]
-            x = x.flatten(start_dim=1)          # [batch, feat]
-            z = self.projection_head(x)
-            return z, None
-
-    def forward_momentum(self, x):
-        if "vit" in self.model:
-            cls_token, pooled_patch = self.backbone_momentum(x)   
-            z = self.projection_head_momentum(cls_token)
-            return z, pooled_patch
-        else:
-            x = self.backbone_momentum(x)
-            x = x.flatten(start_dim=1)
-            z = self.projection_head_momentum(x)
-            return z, None
+        x = self.backbone(x)                # [batch, feat, 1, 1]
+        x = x.flatten(start_dim=1)          # [batch, feat]
+        z = self.projection_head(x)
+        return z
 
     def extract_features(self, x):
-        if "vit" in self.model:
-            cls_token, _ = self.backbone(x)
-            return cls_token
-        else:
-            return self.backbone(x).flatten(start_dim=1)
+        return self.backbone(x).flatten(start_dim=1)
         
 import torch
 import torch.nn as nn

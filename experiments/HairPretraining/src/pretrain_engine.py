@@ -14,7 +14,6 @@ from utils.transform import positive_transform, negative_transform, PositiveMask
 from utils.losses import positive_consistency_loss_margin, bidirectional_margin_loss, nt_xent_1anchor_2positive
 
 #from utils.losses import DINOLoss, IBOTPatchLoss
-from .neg_sampling import NegSamplerClasses, NegSamplerRandomly, NegSamplerNN, NegSamplerStatic
 import timm
 from lightly.utils.scheduler import cosine_schedule
 from lightly.models.utils import deactivate_requires_grad, update_momentum
@@ -67,7 +66,7 @@ class Trainer:
         if self.mode == 'mae':
             self.criterion = nn.MSELoss()
         elif self.mode == 'simclr':
-            self.criterion = NTXentLoss(temperature=args.loss_temp)
+            self.criterion = NTXentLoss(temperature=args.temp)
         elif self.mode == 'simclr_supcon':
             self.criterion = SupConLoss()
         elif self.mode == "dinov2":
@@ -79,7 +78,7 @@ class Trainer:
         elif self.mode == "simMIM":
             self.criterion = nn.L1Loss()
         elif self.mode == "SHAM":
-            self.criterion1 = NTXentLoss(temperature=0.5)
+            self.criterion1 = NTXentLoss(temperature=args.temp)
             self.criterion2 = positive_consistency_loss_margin
             self.criterion3 = bidirectional_margin_loss
             self.criterion4 = nn.MSELoss()
@@ -157,7 +156,7 @@ class Trainer:
             else:
                 self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
                 
-        if not os.path.exists(self.save_path) and self.args.continue_training is False:
+        if not self.args.continue_training:
             print(f"Save {args.mode} at {self.save_path}")      
             os.makedirs(self.save_path, exist_ok=True)
             new_log=True
@@ -198,6 +197,10 @@ class Trainer:
             scaler.step(self.optimizer)
             scaler.update()
             self.optimizer.zero_grad() 
+        
+        with open(self.log_file, 'a') as f:
+            f.write(f"\nEpoch {epoch}: Total Loss = {running_loss/len(self.train_loader):.6f}\n")
+            
         return running_loss / len(self.train_loader)
     
     def train_one_epoch_mae(self, epoch=0, alpha=0, scaler=None):
@@ -558,10 +561,37 @@ class Trainer:
                 total_loss, contrastive_loss, pos_pos_loss, bi_margin_loss, reconstruction_loss = train_one_epoch(epoch=epoch, momentum_val=self.momentum_ema, scaler=self.scaler)
                 print(f"Total train loss: {total_loss:.6f}, Contrastive Loss: {contrastive_loss:.6f}, Pos-pos Loss: {pos_pos_loss:.6f}, Bi-margin Loss: {bi_margin_loss:.6f}, Reconstruction Loss: {reconstruction_loss:.6f}")
             else:
-                train_loss = train_one_epoch(epoch=epoch, alpha=0, scaler=self.scaler)
-                print(f"Train loss: {train_loss:.4f}")
+                total_loss = train_one_epoch(epoch=epoch, alpha=0, scaler=self.scaler)
+                print(f"Train loss: {total_loss:.4f}")
             if (epoch+1) % 50 == 0:
                 file_name = os.path.join(self.save_path, f"model_ckpt_{epoch}.pth")
+                if self.mode=="SHAM":
+                    checkpoint = {
+                        'epoch': epoch,
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scaler_state_dict': self.scaler.state_dict(),
+                        'args': self.args,
+                        'Total_loss': total_loss,
+                        'Contrastive Loss': contrastive_loss,
+                        'Pos-pos loss': pos_pos_loss,
+                        'Bi-margin loss': bi_margin_loss,
+                        'Reconstruction loss': reconstruction_loss
+                    }
+                else:
+                    checkpoint = {
+                        'epoch': epoch,
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scaler_state_dict': self.scaler.state_dict(),
+                        'args': self.args,
+                        'Total_loss': total_loss,
+                    }
+                torch.save(checkpoint, file_name)
+                print(f"✅ Saved checkpoint at epoch {epoch} -> {file_name}")
+                    
+            file_name = os.path.join(self.save_path, f"model_ckpt_latest.pth")
+            if self.mode=="SHAM":
                 checkpoint = {
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
@@ -574,21 +604,15 @@ class Trainer:
                     'Bi-margin loss': bi_margin_loss,
                     'Reconstruction loss': reconstruction_loss
                 }
-                torch.save(checkpoint, file_name)
-                print(f"✅ Saved checkpoint at epoch {epoch} -> {file_name}")
-            file_name = os.path.join(self.save_path, f"model_ckpt_latest.pth")
-            checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': self.model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
-                'scaler_state_dict': self.scaler.state_dict(),
-                'args': self.args,
-                "Total_loss": total_loss,
-                'Contrastive Loss': contrastive_loss,
-                'Pos-pos loss': pos_pos_loss,
-                'Bi-margin loss': bi_margin_loss,
-                'Reconstruction loss': reconstruction_loss
-            }
+            else:
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scaler_state_dict': self.scaler.state_dict(),
+                    'args': self.args,
+                    'Total_loss': total_loss,
+                    }
             torch.save(checkpoint, file_name)
             print(f"✅ Saved checkpoint at epoch {epoch} -> {file_name}")
 

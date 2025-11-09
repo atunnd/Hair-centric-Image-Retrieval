@@ -7,7 +7,7 @@ from utils.transform import get_test_transform, get_train_transform, TwoCropTran
 from utils.dataloader import CustomDataset
 import torch
 from torch.utils.data import DataLoader
-from src.backbone import SupConResNet, SimCLR, MAE, DINOv2, SimMIM, OriginSimCLR
+from src.backbone import SupConResNet, SimCLR, MAE, DINOv2, SimMIM
 from src.main_backbone import SHAM
 import torch
 import torchvision
@@ -135,7 +135,7 @@ def main(args):
     if args.mode == "simclr_supcon":
         model = SupConResNet(name=args.model, feat_dim=args.classes)
     elif args.mode == "simclr":
-        model = OriginSimCLR(model=args.model)
+        model = SimCLR(model=args.model)
     elif args.mode == "mae":
         vit = vit_base_patch16_224()
         model = MAE(vit) 

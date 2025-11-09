@@ -167,10 +167,10 @@ class SHAM(nn.Module):
         x_pred_pixel = self.forward_pixel_decoder(
             x_encoded=x_encoded, idx_keep=idx_keep, idx_mask=idx_mask
         )
-        x_pred_pixel = self.forward_embedding_decoder(
+        x_pred_embedding = self.forward_embedding_decoder(
             x_encoded=x_encoded, idx_keep=idx_keep, idx_mask=idx_mask
         )
-        anchor_embedding = self.proj_head(x_pred_pixel[:, 1:, :].mean(dim=1))
+        anchor_embedding = self.proj_head(x_pred_embedding.mean(dim=1))
 
         # get image patches for masked tokens
         patches = utils.patchify(img_anchor, self.patch_size)
@@ -190,7 +190,7 @@ class SHAM(nn.Module):
             "anchor": anchor_embedding,
             "pos1": pos1_embedding,
             "pos2": pos2_embedding,
-            'masked_prediction': x_pred,
+            'masked_prediction': x_pred_pixel,
             'masked_GT': target
         }
         
