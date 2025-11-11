@@ -12,7 +12,7 @@ import numpy as np
 
 class CustomDataset(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None, transform2=None, our_method=False):
-        self.img_labels = pd.read_csv(annotations_file)[:30000]
+        self.img_labels = pd.read_csv(annotations_file)
         self.img_dir = img_dir
         self.transform = transform
         self.our_method = our_method
@@ -36,9 +36,9 @@ class CustomDataset(Dataset):
             print(f"[WARNING] Failed to load image {img_path}: {e}")
 
         if self.our_method:
-            anchor = self.transform(image)
+            anchor = self.transform(image)[0]
             pos1, pos2 = self.transform2(image)
-            return {"anchor": anchor[0], "pos1": pos1, "pos2": pos2}
+            return {"anchor": anchor, "pos1": pos1, "pos2": pos2}
         else:
             image = self.transform(image)
             return image, label

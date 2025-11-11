@@ -92,7 +92,7 @@ class SHAM(nn.Module):
             patch_size=self.patch_size,
             embed_dim=embed_dim,
             decoder_embed_dim=decoder_dim,
-            decoder_depth=8,
+            decoder_depth=2,
             decoder_num_heads=8,
             mlp_ratio=4.0,
         )
@@ -102,7 +102,7 @@ class SHAM(nn.Module):
             patch_size=self.patch_size,
             embed_dim=embed_dim,
             decoder_embed_dim=decoder_dim,
-            decoder_depth=2,
+            decoder_depth=4,
             decoder_num_heads=8,
             mlp_ratio=4.0,
         )
@@ -122,14 +122,12 @@ class SHAM(nn.Module):
             hidden_dim=decoder_dim,
             output_dim=512
         )
-        self.student_head = projection_head
-        self.student_cls_head = self.student_patch_head = self.student_head
-
         self.teacher_head = projection_head
         self.teacher_cls_head = self.teacher_patch_head = self.teacher_head
-
+        
+        self.student_head = copy.deepcopy(self.teacher_head)
+        self.student_cls_head = self.student_patch_head = self.student_head
         freeze_eval_module(self.teacher_head)
-
 
     # ---------------- Encoder ----------------
     def forward_encoder_student(self, images, idx_keep=None):
@@ -195,8 +193,9 @@ class SHAM(nn.Module):
         target = utils.get_at_index(patches, idx_mask - 1)
         
         # forward pos1
-        pos1_encoded = self.forward_encoder_student(images=img_pos1)
-        pos1_embedding = self.student_head(pos1_encoded[:, 1:, :].mean(dim=1))
+        with torch.no_grad():
+            pos1_encoded = self.forward_encoder_teacher(images=img_pos1)
+            pos1_embedding = self.teacher_head(pos1_encoded[:, 1:, :].mean(dim=1))
         
         # forward pos2
         with torch.no_grad():

@@ -35,8 +35,8 @@ def parse_args():
     parser.add_argument('--test_annotation', type=str, help='Path to testing annotation file')
     parser.add_argument('--img_dir', type=str, help='Path to image directory')
     parser.add_argument('--img_dir_origin', type=str, default=None, help="Path to original image")
-    parser.add_argument('--continue_training', type=bool, default=False, help="Continue training")
-    parser.add_argument('--chechpoint_folder', type=str, default=None, help="Path to checkpoint folder for resuming training")
+    parser.add_argument('--continue_training',  action="store_true", help="Continue training")
+    parser.add_argument('--checkpoint_folder', type=str, default=None, help="Path to checkpoint folder for resuming training")
     parser.add_argument('--training_settings', type=int, default=1, help="Training settings for SHAM", choices=[1,2,3,4])
     parser.add_argument('--full_face_training', action="store_true")
 

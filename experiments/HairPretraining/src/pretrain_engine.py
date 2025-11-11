@@ -122,7 +122,7 @@ class Trainer:
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
                 # Load epoch và các thông tin bổ sung
-                self.start_epoch = checkpoint.get('epoch', 0)
+                self.start_epoch = checkpoint.get('epoch', 0) + 1
                 global_loss = checkpoint.get('global_loss', 0.0)
                 local_loss = checkpoint.get('local_loss', 0.0)
 
@@ -143,18 +143,18 @@ class Trainer:
         ####################################    
         self.momentum_ema = args.ema
         
-        args.full_face_training
         
-        if args.mode=="SHAM":
-            if args.full_face_training:
-                self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_{self.args.SHAM_mode}_full_face_training") 
-            else:
-                self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_{self.args.SHAM_mode}")    
-        else: 
-            if args.full_face_training:
-                self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training")
-            else:
-                self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
+        if not self.args.continue_training:
+            if args.mode=="SHAM":
+                if args.full_face_training:
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_{self.args.SHAM_mode}_full_face_training") 
+                else:
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_{self.args.SHAM_mode}")    
+            else: 
+                if args.full_face_training:
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training")
+                else:
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")
                 
         if not self.args.continue_training:
             print(f"Save {args.mode} at {self.save_path}")      
@@ -219,6 +219,9 @@ class Trainer:
             scaler.step(self.optimizer)
             scaler.update()
             self.optimizer.zero_grad()
+        
+        with open(self.log_file, 'a') as f:
+            f.write(f"\nEpoch {epoch}: Total Loss = {running_loss/len(self.train_loader):.6f}\n")
 
         return running_loss / len(self.train_loader)
 
@@ -470,44 +473,57 @@ class Trainer:
                 embedding_anchor, embedding_pos1, embedding_pos2, masked_prediction, masked_GT = res['anchor'], res['pos1'], res['pos2'], res['masked_prediction'], res['masked_GT']
 
                 
-                if (epoch + 1) > self.warm_up_epochs:
-                    #if (epoch+1 - self.warm_up_epochs) % self.sampling_frequency == 0:
-                    if (epoch+1) - self.warm_up_epochs == 0:
-                        #K, m_star = self.estimate_K_by_PCA(embedding_anchor)
-                        if batch_id ==0:
-                            print("=> Sampling new cluster\n")
-                            self.hard_negative_memory.clear()
-                        K=6
-                        centroids, kmeans = self.run_kmeans(embedding_anchor, K, self.device_id)
-                        hard_neg_ids = self.mine_hard_negatives(embedding_anchor, centroids, kmeans)
-                        self.hard_negative_memory.append(hard_neg_ids.detach().cpu().numpy())
-                        #print(f"Estimated K = {K} (m* = {m_star})")
-                    else:
-                        hard_neg_ids = self.hard_negative_memory[batch_id]
-                else:
-                    hard_neg_ids = sample_random_hard_negatives(embedding_anchor)
-                    if epoch == 0:
-                        self.hard_negative_memory.append(hard_neg_ids.detach().cpu().numpy())
-                    else:
-                        self.hard_negative_memory[batch_id] = hard_neg_ids.detach().cpu().numpy()
+                # if (epoch + 1) > self.warm_up_epochs:
+                #     #if (epoch+1 - self.warm_up_epochs) % self.sampling_frequency == 0:
+                #     if (epoch+1) - self.warm_up_epochs == 0:
+                #         #K, m_star = self.estimate_K_by_PCA(embedding_anchor)
+                #         if batch_id ==0:
+                #             print("=> Sampling new cluster\n")
+                #             self.hard_negative_memory.clear()
+                #         K=6
+                #         centroids, kmeans = self.run_kmeans(embedding_anchor, K, self.device_id)
+                #         hard_neg_ids = self.mine_hard_negatives(embedding_anchor, centroids, kmeans)
+                #         self.hard_negative_memory.append(hard_neg_ids.detach().cpu().numpy())
+                #         #print(f"Estimated K = {K} (m* = {m_star})")
+                #     else:
+                #         hard_neg_ids = self.hard_negative_memory[batch_id]
+                # else:
+                #     hard_neg_ids = sample_random_hard_negatives(embedding_anchor)
+                #     if epoch == 0:
+                #         self.hard_negative_memory.append(hard_neg_ids.detach().cpu().numpy())
+                #     else:
+                #         self.hard_negative_memory[batch_id] = hard_neg_ids.detach().cpu().numpy()
 
-                embedding_hard_negative = embedding_anchor[hard_neg_ids]
+                # embedding_hard_negative = embedding_anchor[hard_neg_ids]
                 
-                contrastive_loss = self.criterion1(embedding_anchor, embedding_pos1) # contrastive loss
-                pos_consistency_loss = self.criterion2(embedding_pos1, embedding_pos2) # Positive–positive consistency loss
-                bidirectional_margin_loss = self.criterion3(embedding_anchor, embedding_pos1, embedding_pos2, embedding_hard_negative) 
+                if batch_id == 0:
+                    with torch.no_grad():
+                        emb_a = embedding_anchor
+                        emb_p1_n = embedding_pos1
+                        emb_a_n = F.normalize(embedding_anchor, dim=-1)
+                        emb_p1_n = F.normalize(embedding_pos1, dim=-1)
+                        mean_norm = emb_a.norm(dim=-1).mean().item()
+                        pos_cos_mean = (emb_a_n * emb_p1_n).sum(dim=-1).mean().item()
+                        max_logit = (emb_a_n @ emb_p1_n.t()).max().item()
+                    print(f"[DBG] emb_norm={mean_norm:.4f}, pos_cos_mean={pos_cos_mean:.4f}, max_logit={max_logit:.4f}")
+
+                
+                contrastive_loss = self.criterion1(embedding_anchor, embedding_pos1.detach()) # contrastive loss
+                #pos_consistency_loss = self.criterion2(embedding_pos1, embedding_pos2) # Positive–positive consistency loss
+                #bidirectional_margin_loss = self.criterion3(embedding_anchor, embedding_pos1, embedding_pos2, embedding_hard_negative) 
                 reconstruction_loss = self.criterion4(masked_prediction, masked_GT) 
                 
-                total_loss = contrastive_loss + 0.5*reconstruction_loss + 0.2*bidirectional_margin_loss + 0.1*pos_consistency_loss
+                #total_loss = 0.5*contrastive_loss + 0.5*reconstruction_loss + 0.1*bidirectional_margin_loss + 0.05*pos_consistency_loss
+                total_loss = contrastive_loss + 0.3*reconstruction_loss
             
             running_loss_total += total_loss.item()
             running_loss_contrastive += contrastive_loss.item()
-            running_loss_pos_pos += pos_consistency_loss.item()
-            running_loss_margin += bidirectional_margin_loss.item()
+            #running_loss_pos_pos += pos_consistency_loss.item()
+            #running_loss_margin += bidirectional_margin_loss.item()
             running_loss_reconstruction += reconstruction_loss.item()
             
-            if batch_id < 3:
-                print(f"Batch id {batch_id}: alloc, reserved:", torch.cuda.memory_allocated()/1e9, torch.cuda.memory_reserved()/1e9)
+            #if batch_id < 3:
+            #    print(f"Batch id {batch_id}: alloc, reserved:", torch.cuda.memory_allocated()/1e9, torch.cuda.memory_reserved()/1e9)
             
             scaler.scale(total_loss).backward()
             scaler.step(self.optimizer)
@@ -523,12 +539,12 @@ class Trainer:
                 embedding_anchor, 
                 embedding_pos1, 
                 embedding_pos2,
-                embedding_hard_negative,
+                #embedding_hard_negative,
                 masked_prediction, masked_GT,
                 total_loss, 
                 contrastive_loss, 
-                pos_consistency_loss,
-                bidirectional_margin_loss, 
+                #pos_consistency_loss,
+                #bidirectional_margin_loss, 
                 reconstruction_loss
             )
 
