@@ -92,20 +92,20 @@ class SHAM(nn.Module):
             patch_size=self.patch_size,
             embed_dim=embed_dim,
             decoder_embed_dim=decoder_dim,
-            decoder_depth=2,
+            decoder_depth=7,
             decoder_num_heads=8,
             mlp_ratio=4.0,
         )
         
-        self.embedding_decoder = MAEDecoderTIMM(
-            num_patches=vit.patch_embed.num_patches,
-            patch_size=self.patch_size,
-            embed_dim=embed_dim,
-            decoder_embed_dim=decoder_dim,
-            decoder_depth=4,
-            decoder_num_heads=8,
-            mlp_ratio=4.0,
-        )
+        # self.embedding_decoder = MAEDecoderTIMM(
+        #     num_patches=vit.patch_embed.num_patches,
+        #     patch_size=self.patch_size,
+        #     embed_dim=embed_dim,
+        #     decoder_embed_dim=decoder_dim,
+        #     decoder_depth=4,
+        #     decoder_num_heads=8,
+        #     mlp_ratio=4.0,
+        # )
 
         # ========== Backbone ==========
         self.student_backbone = copy.deepcopy(self.teacher_backbone)
@@ -156,25 +156,25 @@ class SHAM(nn.Module):
         return x_pred
 
     # ---------------- Embedding Decoder ----------------
-    def forward_embedding_decoder(self, x_encoded, idx_keep, idx_mask):
-        # build decoder input
-        batch_size = x_encoded.shape[0]
-        x_decode = self.embedding_decoder.embed(x_encoded)
-        x_masked = utils.repeat_token(
-            self.embedding_decoder.mask_token, (batch_size, self.sequence_length)
-        )
-        x_masked = utils.set_at_index(x_masked, idx_keep, x_decode.type_as(x_masked))
+    # def forward_embedding_decoder(self, x_encoded, idx_keep, idx_mask):
+    #     # build decoder input
+    #     batch_size = x_encoded.shape[0]
+    #     x_decode = self.embedding_decoder.embed(x_encoded)
+    #     x_masked = utils.repeat_token(
+    #         self.embedding_decoder.mask_token, (batch_size, self.sequence_length)
+    #     )
+    #     x_masked = utils.set_at_index(x_masked, idx_keep, x_decode.type_as(x_masked))
 
-        # decoder forward pass
-        x_decoded = self.embedding_decoder.decode(x_masked)
+    #     # decoder forward pass
+    #     x_decoded = self.embedding_decoder.decode(x_masked)
 
-        # predict pixel values for masked tokens
-        x_pred = utils.get_at_index(x_decoded, idx_mask)
-        x_pred = self.embedding_decoder.predict(x_pred)
-        return x_pred
+    #     # predict pixel values for masked tokens
+    #     x_pred = utils.get_at_index(x_decoded, idx_mask)
+    #     x_pred = self.embedding_decoder.predict(x_pred)
+    #     return x_pred
 
     # ---------------- Full Forward ----------------
-    def forward(self, img_anchor, img_pos1, img_pos2):
+    def forward(self, img_anchor, img_pos1, img_pos2, img_pos3=None, img_pos4=None):
         batch_size = img_anchor.shape[0]
         idx_keep, idx_mask = utils.random_token_mask(
             size=(batch_size, self.sequence_length),
@@ -185,31 +185,51 @@ class SHAM(nn.Module):
         # forward anchor
         anchor_encoded = self.forward_encoder_student(images=img_anchor, idx_keep=idx_keep)
         anchor_pred = self.forward_pixel_decoder(x_encoded=anchor_encoded, idx_keep=idx_keep, idx_mask=idx_mask)
-        anchor_embedding = self.forward_embedding_decoder(x_encoded=anchor_encoded, idx_keep=idx_keep, idx_mask=idx_mask)
-        anchor_embedding = self.student_head(anchor_embedding.mean(dim=1))
+        #anchor_embedding = self.forward_embedding_decoder(x_encoded=anchor_encoded, idx_keep=idx_keep, idx_mask=idx_mask)
+        anchor_embedding = self.student_head(anchor_encoded[:, 1:, :].mean(dim=1))
         # get image patches for masked tokens
         patches = utils.patchify(img_anchor, self.patch_size)
         # must adjust idx_mask for missing class token
         target = utils.get_at_index(patches, idx_mask - 1)
         
         # forward pos1
-        with torch.no_grad():
-            pos1_encoded = self.forward_encoder_teacher(images=img_pos1)
-            pos1_embedding = self.teacher_head(pos1_encoded[:, 1:, :].mean(dim=1))
+        pos1_encoded = self.forward_encoder_student(images=img_pos1)
+        pos1_embedding = self.student_head(pos1_encoded[:, 1:, :].mean(dim=1))
         
         # forward pos2
-        with torch.no_grad():
-            pos2_encoded = self.forward_encoder_teacher(images=img_pos2)
-            pos2_embedding = self.teacher_head(pos2_encoded[:, 1:, :].mean(dim=1))
+        #with torch.no_grad():
+        pos2_encoded = self.forward_encoder_student(images=img_pos2)
+        pos2_embedding = self.student_head(pos2_encoded[:, 1:, :].mean(dim=1))
         
-        return {
-            "anchor": anchor_embedding,
-            "pos1": pos1_embedding,
-            "pos2": pos2_embedding,
-            'masked_prediction': anchor_pred,
-            'masked_GT': target
-        }
-        
+        if img_pos3 is not None and img_pos4 is not None:
+            with torch.no_grad():
+                pos3_encoded = self.forward_encoder_teacher(images=img_pos3)
+                pos3_embedding = self.teacher_head(pos3_encoded[:, 1:, :].mean(dim=1))
+            
+            with torch.no_grad():
+                pos4_encoded = self.forward_encoder_teacher(images=img_pos4)
+                pos4_embedding = self.teacher_head(pos4_encoded[:, 1:, :].mean(dim=1))
+                
+            return {
+                "anchor": anchor_embedding,
+                "pos1": pos1_embedding,
+                "pos2": pos2_embedding,
+                'pos3': pos3_embedding,
+                'pos4': pos4_embedding,
+                'masked_prediction': anchor_pred,
+                'masked_GT': target
+            }
+        else:
+            return {
+                "anchor": anchor_embedding,
+                "pos1": pos1_embedding,
+                "pos2": pos2_embedding,
+                'pos3': None,
+                'pos4': None,
+                'masked_prediction': anchor_pred,
+                'masked_GT': target
+            }
+            
     def extract_features(self, images):
         x_encoded = self.forward_encoder_student(images)
         return x_encoded[:, 1:, :].mean(dim=1)

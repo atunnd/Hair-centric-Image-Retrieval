@@ -142,8 +142,8 @@ def main(args):
     elif args.mode == "mae":
         vit = vit_base_patch16_224()
         model = MAE(vit)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
-        model.load_state_dict(state_dict)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
+        model.load_state_dict(state_dict['model_state_dict'])
         print("✅ Model weights loaded!")
     
     elif args.mode == "dinov2":

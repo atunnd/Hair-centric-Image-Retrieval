@@ -585,3 +585,139 @@ class MAETransform:
 
         """
         return [self.transform(image)]
+
+import numpy as np
+from PIL import Image
+import cv2
+import torch
+from torchvision import transforms
+
+
+# ==================================================
+# Các hàm xử lý bounding box
+# ==================================================
+def get_mask_and_bbox(img_np, threshold=0):
+    mask = np.any(img_np > threshold, axis=2)
+    ys, xs = np.where(mask)
+    if len(xs) == 0:
+        return mask, None
+    x_min, x_max = xs.min(), xs.max() + 1
+    y_min, y_max = ys.min(), ys.max() + 1
+    return mask, (x_min, y_min, x_max, y_max)
+
+
+def center_bbox_before_zoom(bbox, image_size):
+    W, H = image_size
+    x_min, y_min, x_max, y_max = bbox
+    w = x_max - x_min
+    h = y_max - y_min
+    cx_new = W / 2
+    cy_new = H / 2
+    left = cx_new - w / 2
+    right = cx_new + w / 2
+    top = cy_new - h / 2
+    bottom = cy_new + h / 2
+    return (left, top, right, bottom)
+
+
+# ==================================================
+# Optimal enlarge (không vòng lặp)
+# ==================================================
+def enlarge_until_touch_optimal(bbox, image_size):
+    W, H = image_size
+    left, top, right, bottom = bbox
+
+    w = right - left
+    h = bottom - top
+
+    cx = (left + right) / 2
+    cy = (top + bottom) / 2
+
+    dist_left   = cx
+    dist_right  = W - cx
+    dist_top    = cy
+    dist_bottom = H - cy
+
+    max_scale_x = (2 * min(dist_left, dist_right)) / w
+    max_scale_y = (2 * min(dist_top, dist_bottom)) / h
+
+    scale = min(max_scale_x, max_scale_y)
+
+    new_w = w * scale
+    new_h = h * scale
+
+    L = cx - new_w / 2
+    R = cx + new_w / 2
+    T = cy - new_h / 2
+    B = cy + new_h / 2
+
+    return (L, T, R, B), scale
+
+
+# ==================================================
+# Dán crop vào canvas
+# ==================================================
+def paste_resized_crop_onto_canvas(img_np, crop_box, target_box, canvas_size):
+    Wc, Hc = canvas_size
+    Hs, Ws = img_np.shape[:2]
+
+    x0 = int(max(0, np.floor(crop_box[0])))
+    y0 = int(max(0, np.floor(crop_box[1])))
+    x1 = int(min(Ws, np.ceil(crop_box[2])))
+    y1 = int(min(Hs, np.ceil(crop_box[3])))
+
+    crop = img_np[y0:y1, x0:x1]
+
+    target_w = int(round(target_box[2] - target_box[0]))
+    target_h = int(round(target_box[3] - target_box[1]))
+
+    pil_crop = Image.fromarray(crop)
+    pil_resized = pil_crop.resize((target_w, target_h), Image.BILINEAR)
+    resized = np.array(pil_resized)
+
+    canvas = np.zeros((Hc, Wc, 3), dtype=np.uint8)
+
+    paste_left = int(round(target_box[0]))
+    paste_top = int(round(target_box[1]))
+    paste_right = paste_left + target_w
+    paste_bottom = paste_top + target_h
+
+    ov_left = max(0, paste_left)
+    ov_top = max(0, paste_top)
+    ov_right = min(Wc, paste_right)
+    ov_bottom = min(Hc, paste_bottom)
+
+    src_x0 = ov_left - paste_left
+    src_y0 = ov_top - paste_top
+    src_x1 = src_x0 + (ov_right - ov_left)
+    src_y1 = src_y0 + (ov_bottom - ov_top)
+
+    canvas[ov_top:ov_bottom, ov_left:ov_right] = resized[src_y0:src_y1, src_x0:src_x1]
+    return canvas
+
+
+# ==================================================
+#  TRANSFORM CHÍNH
+# ==================================================
+class HairZoomTransform:
+    def __init__(self, size=224, threshold=0):
+        self.size = size
+        self.threshold = threshold
+
+    def __call__(self, image):
+        img_rgb = np.array(image)
+
+        # Resize input về 224x224
+        img_np = cv2.resize(img_rgb, (self.size, self.size), interpolation=cv2.INTER_NEAREST)
+        H, W = img_np.shape[:2]
+
+        mask, bbox = get_mask_and_bbox(img_np, threshold=self.threshold)
+        if bbox is None:
+            return image  # không có tóc
+
+        centered = center_bbox_before_zoom(bbox, (W, H))
+        final_bbox, _ = enlarge_until_touch_optimal(centered, (W, H))
+
+        canvas_np = paste_resized_crop_onto_canvas(img_np, bbox, final_bbox, (W, H))
+
+        return Image.fromarray(canvas_np)

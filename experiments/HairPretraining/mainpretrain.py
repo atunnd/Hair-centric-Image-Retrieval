@@ -39,6 +39,8 @@ def parse_args():
     parser.add_argument('--checkpoint_folder', type=str, default=None, help="Path to checkpoint folder for resuming training")
     parser.add_argument('--training_settings', type=int, default=1, help="Training settings for SHAM", choices=[1,2,3,4])
     parser.add_argument('--full_face_training', action="store_true")
+    parser.add_argument('--multi_view', action="store_true")
+    parser.add_argument('--no_contrastive_loss', action="store_true")
 
     # optimization config
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
@@ -60,6 +62,7 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=4)
 
     # negative sampling
+    parser.add_argument("--negative_sampling", action="store_true")
     parser.add_argument('--warm_up_epochs', default=20, type=int, help='Number of warmup epochs for negative sampling')
     parser.add_argument('--sampling_frequency', type=int, default=30, help="Frequency to sample hard negative")
     parser.add_argument('--ema', type=float, default=0.99)
@@ -125,7 +128,7 @@ def main(args):
         train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=TwoCropTransform(train_transform))
     else:
         if args.mode == "SHAM":
-            train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=anchor_transform, transform2=pos_transform, our_method=True)
+            train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=anchor_transform, transform2=pos_transform, our_method=True, multi_view=args.multi_view)
         else:
             train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=train_transform)
 

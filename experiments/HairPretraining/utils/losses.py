@@ -541,53 +541,35 @@ class PatchContrastiveLoss(torch.nn.Module):
 import torch
 import torch.nn.functional as F
 
-def positive_consistency_loss_margin(pos1, pos2, m_p=0.1, reduction='mean'):
-    """
-    Soft-margin version:
-    L_pp = log(1 + exp(m_p - cosine_similarity(p1, p2)))
-    """
-    pos1 = F.normalize(pos1, dim=1)
-    pos2 = F.normalize(pos2, dim=1)
-    sim = torch.sum(pos1 * pos2, dim=1)
-    loss = torch.log1p(torch.exp(m_p - sim))
-    
+def positive_consistency_loss_margin(pos1, pos2, m_p=0.5, reduction='mean'):
+    # Euclidean distance
+    dist = torch.norm(pos1 - pos2, dim=1)   # L2 distance
+
+    # softplus(d - m_p)
+    loss = F.softplus(dist - m_p)
+
     if reduction == 'mean':
         return loss.mean()
     elif reduction == 'sum':
         return loss.sum()
-    else:
-        return loss
+    return loss
 
     
 import torch
 import torch.nn.functional as F
 
-def bidirectional_margin_loss(anchor, pos1, pos2, neg, m_p=0.7, m_n=0.3, reduction='mean'):
-    """
-    Bidirectional Margin Loss:
-    L_bi = log(1 + exp(m_p - s(u,p1))) 
-         + log(1 + exp(m_p - s(u,p2))) 
-         + log(1 + exp(s(u,nh) - m_n))
-    Args:
-        anchor, pos1, pos2, neg: [B, D] tensors
-        m_p, m_n: margins
-        reduction: 'mean' or 'sum' or 'none'
-    """
-    # Normalize for cosine similarity
-    anchor = F.normalize(anchor, dim=1)
-    pos1 = F.normalize(pos1, dim=1)
-    pos2 = F.normalize(pos2, dim=1)
-    neg = F.normalize(neg, dim=1)
+def bidirectional_margin_loss(anchor, pos1, pos2, m_p=0.1, reduction='mean'):
+    # Euclidean distances
+    d_up1 = torch.norm(anchor - pos1, dim=1)
+    d_up2 = torch.norm(anchor - pos2, dim=1)
+    #d_un  = torch.norm(anchor - neg,   dim=1)
 
-    # Cosine similarities
-    s_up1 = torch.sum(anchor * pos1, dim=1)  # s(u, p1)
-    s_up2 = torch.sum(anchor * pos2, dim=1)  # s(u, p2)
-    s_un = torch.sum(anchor * neg, dim=1)    # s(u, nh)
+    # Positive pairs: want d_small
+    term1 = F.softplus(d_up1 - m_p)
+    term2 = F.softplus(d_up2 - m_p)
 
-    # Compute log(1 + exp(...))
-    term1 = torch.log1p(torch.exp(m_p - s_up1))
-    term2 = torch.log1p(torch.exp(m_p - s_up2))
-    term3 = torch.log1p(torch.exp(s_un - m_n))
+    # Negative pair: want d_large
+    term3 = F.softplus(m_n - d_un)
 
     loss = term1 + term2 + term3
 
@@ -595,8 +577,7 @@ def bidirectional_margin_loss(anchor, pos1, pos2, neg, m_p=0.7, m_n=0.3, reducti
         return loss.mean()
     elif reduction == 'sum':
         return loss.sum()
-    else:
-        return loss
+    return loss
 
 import torch
 import torch.nn.functional as F
@@ -631,3 +612,90 @@ def nt_xent_1anchor_2positive(u, p1, p2, tau=0.5):
     # ------- Total loss -------
     loss = (loss_pos + loss_neg / tau).mean()
     return loss
+
+class S2R2Loss(nn.Module):
+    def __init__(self, tau=0.01, k_views=3):
+        """
+        S2R2 Loss (Smooth-AP Approximation) - Modified for Concat Input.
+        
+        Args:
+            tau (float): Nhiệt độ (temperature) cho hàm sigmoid.
+            k_views (int): Số lượng view của mỗi ảnh.
+        """
+        super(S2R2Loss, self).__init__()
+        self.tau = tau
+        self.k_views = k_views
+
+    def forward(self, embeddings, targets=None):
+        """
+        Args:
+            embeddings: Tensor kích thước (Batch_Size * K, Embed_Dim).
+                        Cấu trúc mong đợi: [All_View_1, All_View_2, ..., All_View_K]
+                        Ví dụ: torch.cat([features_v1, features_v2], dim=0)
+            targets:    (Optional) Nhãn thực tế.
+        """
+        
+        # 1. Chuẩn bị dữ liệu
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        
+        device = embeddings.device
+        dtype = embeddings.dtype
+        n = embeddings.shape[0] # Tổng số vector (B * K)
+
+        # --- PHẦN SỬA ĐỔI QUAN TRỌNG ---
+        # Nếu không có targets, tự tạo dựa trên giả định input là Concat của các View
+        if targets is None:
+            batch_size = n // self.k_views
+            
+            # Tạo nhãn [0, 1, 2, ..., B-1]
+            base_targets = torch.arange(batch_size, device=device)
+            
+            # Lặp lại toàn bộ chuỗi k lần. 
+            # Kết quả: [0, 1, ..., B-1, 0, 1, ..., B-1]
+            # Tương ứng với: [View1_Img1...View1_ImgB, View2_Img1...View2_ImgB]
+            targets = base_targets.repeat(self.k_views)
+        # -------------------------------
+
+        # 2. Tính Ma trận Similarity (Cosine)
+        sim_mat = torch.matmul(embeddings, embeddings.T) # (N, N)
+
+        # 3. Tạo Mask Positive/Negative
+        # targets giống nhau => Positive
+        pos_mask = torch.eq(targets.view(-1, 1), targets.view(1, -1)).type(dtype)
+        
+        # Loại bỏ đường chéo (chính nó)
+        diag_mask = torch.eye(n, device=device, dtype=dtype)
+        pos_mask -= diag_mask 
+        
+        # Mask cho tất cả các ảnh trừ chính nó (Mẫu số)
+        all_mask = 1.0 - diag_mask
+
+        # 4. Tính toán Ranking (Differentiable)
+        # sim_diff[q, i, j] = sim(q, j) - sim(q, i)
+        # Lưu ý: Đoạn này tốn bộ nhớ O(N^3). Nếu N > 1024 có thể cần loop.
+        sim_diff = sim_mat.unsqueeze(1) - sim_mat.unsqueeze(2) 
+        
+        # Sigmoid xấp xỉ hàm chỉ thị
+        sigmoid_diff = torch.sigmoid(sim_diff / self.tau)
+
+        # 5. Tính Rank Rq(i, X)
+        # Rank trong tập Positive (Tử số)
+        rank_pos = 1 + (sigmoid_diff * pos_mask.unsqueeze(0)).sum(dim=2)
+        
+        # Rank trong tập All (Mẫu số)
+        rank_all = 1 + (sigmoid_diff * all_mask.unsqueeze(0)).sum(dim=2)
+
+        # 6. Tính AP
+        ap_ratio = rank_pos / (rank_all + 1e-8)
+        
+        # Chỉ tính tổng AP cho các cặp Positive
+        ap_sum = (ap_ratio * pos_mask).sum(dim=1)
+        
+        # Chia cho số lượng positive (|IP|)
+        num_pos = pos_mask.sum(dim=1)
+        ap_q = ap_sum / (num_pos + 1e-8)
+
+        # 7. Final Loss (Minimize 1 - Mean AP)
+        loss = 1 - ap_q.mean()
+        
+        return loss
