@@ -114,6 +114,11 @@ class MSN(nn.Module):
         )
         out = self.anchor_backbone(images=images, idx_keep=idx_keep)
         return self.anchor_projection_head(out)
+    
+    @torch.no_grad()
+    def extract_features(self, x):
+        x = self.backbone(x)
+        return x
 
 class DenseCL(nn.Module):
     def __init__(self, backbone):
@@ -153,7 +158,7 @@ class DenseCL(nn.Module):
 
     def extract_features(self, x):
         x = self.backbone(x)
-        return self.pool(query_features).flatten(start_dim=1)
+        return self.pool(x).flatten(start_dim=1)
 
 
 class SimCLR(nn.Module):

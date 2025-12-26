@@ -8,7 +8,7 @@ from utils.transform import knn_transform
 from utils.dataloader import CustomDataset
 import torch
 from torch.utils.data import DataLoader
-from src.backbone import SupConResNet, SimCLR, MAE, DINOv2, SimMIM, SimCLR, SiameseIMViT
+from src.backbone import SupConResNet, SimCLR, MAE, DINOv2, SimMIM, SimCLR, SiameseIMViT, DenseCL, MSN
 import torch
 import torchvision
 from torch import nn
@@ -52,7 +52,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
 
     # Model option
-    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'siaMIM', "SHAM"])
+    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'siaMIM', "SHAM", "DenseCL", "MSN"])
     parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50', "vit_b_16"])
     parser.add_argument('--checkpoint_path', type=str, default=None)
     parser.add_argument('--device', type=str, default='cuda', help='Device to use: cuda or cpu')
@@ -148,19 +148,34 @@ def main(args):
     
     elif args.mode == "dinov2":
         model = DINOv2()
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
         model.load_state_dict(state_dict)
         print("✅ Model weights loaded!")
 
     elif args.mode == "simMIM":
         vit = torchvision.models.vit_b_16(pretrained=False)
         model = SimMIM(vit)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
         model.load_state_dict(state_dict)
+        print("✅ Model weights loaded!")
+    
+    elif args.mode == "DenseCL":
+        resnet = torchvision.models.resnet50()
+        backbone = nn.Sequential(*list(resnet.children())[:-2])
+        model = DenseCL(backbone)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
+        model.load_state_dict(state_dict['model_state_dict'])
+        print("✅ Model weights loaded!")
+    
+    elif args.mode == "MSN":
+        vit = torchvision.models.vit_b_16(pretrained=False)
+        model = MSN(vit)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
+        model.load_state_dict(state_dict['model_state_dict'])
         print("✅ Model weights loaded!")
         
     elif args.mode == "siaMIM":
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
         backbone = state_dict['model']
         ckpt_args = state_dict["args"]
         model = SiameseIMViT(
