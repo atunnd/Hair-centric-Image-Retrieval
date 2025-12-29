@@ -69,6 +69,9 @@ def parse_args():
     # retrieval setting
     parser.add_argument('--S2R2', action="store_true", help="Adding S2R2 regularization")
     
+    # ablation study
+    parser.add_argument("--ablation", default = "None", choices = ["None", "randomly", "fixed_hard", "fixed_margin_0_7", "fixed_margin_0_5"])
+    
 
     return parser.parse_args()
 

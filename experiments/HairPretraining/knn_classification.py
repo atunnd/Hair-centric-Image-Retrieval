@@ -129,8 +129,8 @@ def main(args):
 
     elif args.mode == "simclr":
         model = SimCLR(model=args.model)
-        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=True)
-        model.load_state_dict(state_dict)
+        state_dict = torch.load(args.checkpoint_path, map_location=args.device, weights_only=False)
+        model.load_state_dict(state_dict['model_state_dict'])
         print("✅ Model weights loaded!")
     
     elif args.mode == "SHAM":
@@ -194,7 +194,7 @@ def main(args):
     elif args.eval_type == "linear_prob":
         trainer.linear_probe_eval()
     elif args.eval_type == "visualization":
-        trainer.save_umap()
+        trainer.save_umap(split="test")
 
 if __name__ == "__main__":
     args = parse_args()

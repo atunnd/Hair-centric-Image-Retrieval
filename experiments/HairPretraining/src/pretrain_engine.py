@@ -95,6 +95,11 @@ class Trainer:
             self.triplet_loss_stage2 = nn.TripletMarginLoss(margin=0.5, p=2, eps=1e-7)
             self.criterion5 = S2R2Loss(tau=0.01, k_views=3)
             self.positive_masking_transform = PositiveMaskingTransform(mask_ratio_range=(0.1, 0.5))
+            self.ablation = args.ablation
+            if self.ablation == "fixed_margin_0_7":
+                self.triplet_loss_stage1 = self.triplet_loss_stage2 = nn.TripletMarginLoss(margin=0.7, p=2, eps=1e-7)
+            elif self.ablation == "fixed_margin_0_5":
+                self.triplet_loss_stage1 = self.triplet_loss_stage2 = nn.TripletMarginLoss(margin=0.5, p=2, eps=1e-7)
         
         # optimizer configuration
         if not self.mode == "DenseCL":
@@ -178,6 +183,8 @@ class Trainer:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training") 
                 elif args.multi_view:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_multi_view_hard_negative_mining") 
+                elif self.ablation != "None":
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_ablation_{self.ablation}") 
                 elif self.negative_sampling:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_hard_negative_mining")
                 elif self.no_contrastive_loss:
@@ -600,10 +607,37 @@ class Trainer:
             # if self.multi_view:
             #     x_pos_3 = images['pos3'].to(self.device) 
             
-            
-            if self.warm_up_epochs > epoch + 1:     #STAGE 1: RANDOMLY NEGATIVE MINING
+            if self.ablation == "None":
+                if self.warm_up_epochs > epoch + 1:     #STAGE 1: RANDOMLY NEGATIVE MINING
+                    negative_samples = NegSamplerRandomly(x_pos_1)
+                else:
+                    if (epoch + 1) == self.warm_up_epochs:
+                        if batch_id == 0:
+                            self.negative_batch_idx = []
+
+                            B = x_anchor.shape[0]
+                            v = prev_margin_violations/B
+                            x = max(2, math.floor((1 - v) * 10))
+                            y = x + 5
+                            random_k = random.randint(x, y)
+                            total_k = random_k
+                            print(f"\n=>[x, y] = [{x}, {y}]\n")
+                            
+                        self.negative_batch_idx.append(NegSamplerStatic(self.model, x_pos_1, k=total_k)) # negative with momentum model
+                    
+                        if batch_id == len(self.train_loader) - 1:
+                            print("==> Hard neg indices saved!")
+                            file_name = os.path.join(self.save_path, f"hard_neg_indices.pt")
+                            torch.save(self.negative_batch_idx, file_name)
+
+                    # print("Len idx: ", len(self.negative_batch_idx[batch_id]))
+                    negative_samples = x_pos_1[self.negative_batch_idx[batch_id]]
+                    # print("Negative samples: ", negative_samples[0].min(), negative_samples[0].max())
+                    
+            elif self.ablation == "randomly":
                 negative_samples = NegSamplerRandomly(x_pos_1)
-            else:
+                
+            elif self.ablation == "fixed_hard":
                 if (epoch + 1) == self.warm_up_epochs:
                     if batch_id == 0:
                         self.negative_batch_idx = []
@@ -622,11 +656,8 @@ class Trainer:
                         print("==> Hard neg indices saved!")
                         file_name = os.path.join(self.save_path, f"hard_neg_indices.pt")
                         torch.save(self.negative_batch_idx, file_name)
-
-                # print("Len idx: ", len(self.negative_batch_idx[batch_id]))
                 negative_samples = x_pos_1[self.negative_batch_idx[batch_id]]
-                # print("Negative samples: ", negative_samples[0].min(), negative_samples[0].max())
-            
+        
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 # res = self.model(x_anchor, x_pos_2, x_pos_3)
                 # anchor_batch_s, anchor_batch_t, pos_batch, pos_batch_2 = res["anchor_s"], res["anchor_t"], res["pos_contrastive"], res["pos2_contrastive"]

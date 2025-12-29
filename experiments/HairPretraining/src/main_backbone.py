@@ -597,3 +597,12 @@ class SHAM2(nn.Module):
             return cls_token
         else:
             return self.backbone(x).flatten(start_dim=1)
+    
+    @torch.no_grad()
+    def extract_features_ema(self, x):
+        if "vit" in self.model:
+            cls_token, _ = self.backbone_momentum(x)
+            return cls_token
+        else:
+            return self.backbone_momentum(x).flatten(start_dim=1)
+    
