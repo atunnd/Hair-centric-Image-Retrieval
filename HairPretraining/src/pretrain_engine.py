@@ -652,7 +652,10 @@ class Trainer:
                 pos_samples = positive_transform(x_pos_1)
                 pos_batch = self.model(pos_samples)
                 anchor_batch = self.model(x_anchor)
-                masked_pos_samples = self.positive_masking_transform(pos_samples)
+                if self.ablation == "No masked positive":
+                    masked_pos_samples = pos_samples
+                else:
+                    masked_pos_samples = self.positive_masking_transform(pos_samples)
                 masked_pos_batch = self.model.forward_momentum(masked_pos_samples)
                 
             
