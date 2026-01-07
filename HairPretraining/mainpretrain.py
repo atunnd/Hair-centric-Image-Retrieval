@@ -65,12 +65,14 @@ def parse_args():
     parser.add_argument("--negative_sampling", action="store_true")
     parser.add_argument('--warm_up_epochs', default=20, type=int, help='Number of warmup epochs for negative sampling')
     parser.add_argument('--ema', type=float, default=0.99)
+    parser.add_argument('--k', type=int, default=15, choices=[3, 5, 7, 11, 15])
     
     # retrieval setting
     parser.add_argument('--S2R2', action="store_true", help="Adding S2R2 regularization")
     
     # ablation study
     parser.add_argument("--ablation", default = "None", choices = ["None", "randomly", "fixed_hard", "fixed_margin_0_7", "fixed_margin_0_5", "No_MSE", "No_Triplet"])
+    
     
 
     return parser.parse_args()

@@ -181,16 +181,10 @@ class Trainer:
             if args.mode=="SHAM":
                 if args.full_face_training:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training") 
-                elif args.multi_view:
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_multi_view_hard_negative_mining") 
                 elif self.ablation != "None":
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_ablation_{self.ablation}") 
-                elif self.negative_sampling:
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_hard_negative_mining")
-                elif self.no_contrastive_loss:
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_no_contrastive_loss")
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_ablation_{self.ablation}_k_{args.k}") 
                 else:
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}")    
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_k_{args.k}")    
             else: 
                 if args.full_face_training:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training")
