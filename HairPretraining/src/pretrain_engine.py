@@ -116,6 +116,7 @@ class Trainer:
         self.mode_model = args.model
 
         self.negative_batch_idx =[]
+        self.k = args.k
         
 
         ####################################
@@ -182,9 +183,9 @@ class Trainer:
                 if args.full_face_training:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training") 
                 elif self.ablation != "None":
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_ablation_{self.ablation}_k_{args.k}") 
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_ablation_{self.ablation}_k_{self.k}") 
                 else:
-                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_k_{args.k}")    
+                    self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_k_{self.k}")    
             else: 
                 if args.full_face_training:
                     self.save_path = os.path.join(self.save_path, f"{self.mode}_{self.mode_model}_full_face_training")
@@ -601,7 +602,7 @@ class Trainer:
             # if self.multi_view:
             #     x_pos_3 = images['pos3'].to(self.device) 
             
-            if self.ablation != "None" or self.ablation == "fixed_margin_0_5" or  self.ablation == "fixed_margin_0_7":
+            if self.ablation == "None" or self.ablation != "randomly" or  self.ablation != "fixed_hard":
                 if self.warm_up_epochs > epoch + 1:     #STAGE 1: RANDOMLY NEGATIVE MINING
                     negative_samples = NegSamplerRandomly(x_pos_1)
                 else:
@@ -616,7 +617,7 @@ class Trainer:
                         #     random_k = random.randint(x, y)
                         #     total_k = random_k
                         #     print(f"\n=>[x, y] = [{x}, {y}]\n")
-                        total_k = random_k = 15
+                        total_k = random_k = self.k
                             
                         self.negative_batch_idx.append(NegSamplerStatic(self.model, x_pos_1, k=total_k)) # negative with momentum model
                     
@@ -686,11 +687,11 @@ class Trainer:
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 # Forward triplet loss
                 if self.ablation != "No_Triplet":
-                        if self.warm_up_epochs > epoch + 1:
-                            triplet_loss = self.triplet_loss_stage1(anchor_batch, pos_batch, neg_batch)
-                        else:
-                            triplet_loss = self.triplet_loss_stage2(anchor_batch, pos_batch, neg_batch)
-                        running_loss_triplet += triplet_loss.item()
+                    if self.warm_up_epochs > epoch + 1:
+                        triplet_loss = self.triplet_loss_stage1(anchor_batch, pos_batch, neg_batch)
+                    else:
+                        triplet_loss = self.triplet_loss_stage2(anchor_batch, pos_batch, neg_batch)
+                    running_loss_triplet += triplet_loss.item()
                 
                 # Forward contrastive loss
                 contrastive_loss = self.criterion1(pos_batch, anchor_batch)
