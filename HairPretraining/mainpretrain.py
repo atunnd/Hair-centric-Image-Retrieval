@@ -117,14 +117,14 @@ def main(args):
     elif args.mode == "DenseCL":
         train_transform = DenseCLTransform(input_size=224)
     elif args.mode == "SHAM":
-        anchor_transform = MAETransform(input_size=224, min_scale=0.8)
-        pos_transform = SimCLRTransform(input_size=224) 
+        train_transform = SimCLRTransform(input_size=224) 
+
 
     if args.mode == "simclr_supcon":
         train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=TwoCropTransform(train_transform))
     else:
         if args.mode == "SHAM":
-            train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=anchor_transform, transform2=pos_transform, our_method=True, multi_view=args.multi_view)
+            train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=train_transform, our_method=True)
         else:
             train_dataset = CustomDataset(annotations_file=args.train_annotation, img_dir=args.img_dir, transform=train_transform)
 

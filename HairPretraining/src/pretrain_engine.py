@@ -579,16 +579,11 @@ class Trainer:
         running_neg_dist = 0.0
         running_margin_violations = 0.0
         total_k=0.0
-        momentum = cosine_schedule(epoch, self.epochs, 0.996, 1)
+        #momentum = cosine_schedule(epoch, self.epochs, 0.996, 1)
         
-        for batch_id, batch in enumerate(tqdm(self.train_loader, desc="Training with negative samples")):
+        for batch_id, batch in enumerate(tqdm(self.train_loader, desc="Running...")):
             self.optimizer.zero_grad()
             
-            # update backbone momentum
-            # update header
-            #update_momentum(self.model.student_backbone, self.model.teacher_backbone, m=momentum)
-            #update_momentum(self.model.student_head, self.model.teacher_head, m=momentum)
-            #update_momentum(self.model.student_fusion_head, self.model.teacher_fusion_head, m=momentum)
             current_m = momentum_val  
             update_momentum(self.model.backbone, self.model.backbone_momentum, m=current_m)
             update_momentum(self.model.projection_head, self.model.projection_head_momentum, m=current_m)
@@ -597,10 +592,7 @@ class Trainer:
             current_m = momentum_val 
     
             x_anchor = images['anchor'].to(self.device)
-            x_pos_1 = images['pos1'].to(self.device) 
-            #x_pos_2 = images['pos2'].to(self.device)
-            # if self.multi_view:
-            #     x_pos_3 = images['pos3'].to(self.device) 
+            x_pos_1 = images['pos1'].to(self.device)  
             
             if self.ablation != "randomly" and self.ablation != "fixed_hard":
                 if self.warm_up_epochs > epoch + 1:     #STAGE 1: RANDOMLY NEGATIVE MINING
@@ -631,7 +623,8 @@ class Trainer:
                         v = prev_margin_violations/B
                         x = max(2, math.floor((1 - v) * 10))
                         y = x + 5
-                        random_k = random.randint(x, y)
+                        #random_k = random.randint(x, y)
+                        random_k = x
                         total_k = random_k
                         print(f"\n=>[x, y] = [{x}, {y}]\n")
                         
@@ -644,10 +637,6 @@ class Trainer:
                 negative_samples = x_pos_1[self.negative_batch_idx[batch_id]]
         
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                # res = self.model(x_anchor, x_pos_2, x_pos_3)
-                # anchor_batch_s, anchor_batch_t, pos_batch, pos_batch_2 = res["anchor_s"], res["anchor_t"], res["pos_contrastive"], res["pos2_contrastive"]
-                # anchor_ranking, pos_batch_ranking, pos_batch_2_ranking = res["anchor_ranking"], res["pos_ranking"], res["pos2_ranking"]
-                # anchor_patch, pos_patch = res["anchor_patch"], res["pos_patch"]
                 neg_batch = self.model(negative_samples)
                 pos_samples = positive_transform(x_pos_1)
                 pos_batch = self.model(pos_samples)

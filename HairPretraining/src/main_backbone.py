@@ -561,10 +561,10 @@ class SHAM2(nn.Module):
         # momentum encoder
         self.backbone_momentum = copy.deepcopy(self.backbone)
         self.projection_head_momentum = copy.deepcopy(self.projection_head)
-        #deactivate_requires_grad(self.backbone_momentum)
-        #deactivate_requires_grad(self.projection_head_momentum)
-        freeze_eval_module(self.backbone_momentum)
-        freeze_eval_module(self.projection_head_momentum)
+        deactivate_requires_grad(self.backbone_momentum)
+        deactivate_requires_grad(self.projection_head_momentum)
+        #freeze_eval_module(self.backbone_momentum)
+        f#reeze_eval_module(self.projection_head_momentum)
 
     def forward(self, x):
         if "vit" in self.model:
