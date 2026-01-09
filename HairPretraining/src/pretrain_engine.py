@@ -636,7 +636,7 @@ class Trainer:
                         torch.save(self.negative_batch_idx, file_name)
                 negative_samples = x_pos_1[self.negative_batch_idx[batch_id]]
         
-            with torch.amp.autocast():
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 neg_batch = self.model(negative_samples)
                 #pos_samples = positive_transform(x_pos_1)
                 pos_samples = x_pos_1
@@ -666,7 +666,7 @@ class Trainer:
                 running_neg_dist += neg_dist.mean().item()
                 running_margin_violations += violations.sum().item()
 
-            with torch.amp.autocast():
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 # Forward triplet loss
                 if self.ablation != "No_Triplet":
                     if self.warm_up_epochs > epoch + 1:

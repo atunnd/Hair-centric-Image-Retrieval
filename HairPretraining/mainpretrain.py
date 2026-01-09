@@ -3,7 +3,7 @@ from src.pretrain_engine import Trainer
 from utils.utils import set_seed
 import yaml
 import os
-from utils.transform import get_test_transform, get_train_transform, TwoCropTransform, SHAMTransform
+from utils.transform import get_test_transform, get_train_transform, TwoCropTransform
 from utils.dataloader import CustomDataset
 import torch
 from torch.utils.data import DataLoader

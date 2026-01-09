@@ -9,7 +9,6 @@ from torchvision.io import read_file, decode_image
 from torchvision.transforms.functional import to_pil_image
 import cv2
 import numpy as np
-from .transform import HairZoomTransform 
 
 class CustomDataset(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None, our_method=False):
