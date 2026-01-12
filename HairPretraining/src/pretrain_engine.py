@@ -580,16 +580,15 @@ class Trainer:
         running_margin_violations = 0.0
         total_k=0.0
         #momentum = cosine_schedule(epoch, self.epochs, 0.996, 1)
+        momentum =  momentum_val
         
         for batch_id, batch in enumerate(tqdm(self.train_loader, desc="Running...")):
             self.optimizer.zero_grad()
-            
-            current_m = momentum_val  
-            update_momentum(self.model.backbone, self.model.backbone_momentum, m=current_m)
-            update_momentum(self.model.projection_head, self.model.projection_head_momentum, m=current_m)
+             
+            update_momentum(self.model.backbone, self.model.backbone_momentum, m=momentum)
+            update_momentum(self.model.projection_head, self.model.projection_head_momentum, m=momentum)
             
             images = batch
-            current_m = momentum_val 
     
             x_anchor = images['anchor'].to(self.device)
             x_pos_1 = images['pos1'].to(self.device)  
@@ -599,7 +598,17 @@ class Trainer:
                     negative_samples = NegSamplerRandomly(x_pos_1)
                 else:
                     if (epoch + 1) == self.warm_up_epochs:
-                        total_k = random_k = self.k
+                        if batch_id == 0:
+                            self.negative_batch_idx = []
+    
+                            B = x_anchor.shape[0]
+                            v = prev_margin_violations/B
+                            x = max(2, round((1 - v) * 10))
+                            y = x + 5
+                            #random_k = random.randint(x, y)
+                            random_k = x
+                            total_k = random_k
+                            print(f"\n=>[x, y] = [{x}, {y}]\n")
                         self.negative_batch_idx.append(NegSamplerStatic(self.model, x_pos_1, k=total_k)) # negative with momentum model
                     
                         if batch_id == len(self.train_loader) - 1:
@@ -621,7 +630,7 @@ class Trainer:
 
                         B = x_anchor.shape[0]
                         v = prev_margin_violations/B
-                        x = max(2, math.floor((1 - v) * 10))
+                        x = max(2, round((1 - v) * 10))
                         y = x + 5
                         #random_k = random.randint(x, y)
                         random_k = x
@@ -638,15 +647,16 @@ class Trainer:
         
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 neg_batch = self.model(negative_samples)
-                #pos_samples = positive_transform(x_pos_1)
-                pos_samples = x_pos_1
+                pos_samples = positive_transform(x_pos_1)
+                #pos_samples = x_pos_1
                 pos_batch = self.model(pos_samples)
                 anchor_batch = self.model(x_anchor)
                 if self.ablation == "No masked positive":
                     masked_pos_samples = pos_samples
                 else:
                     masked_pos_samples = self.positive_masking_transform(pos_samples)
-                masked_pos_batch = self.model.forward_momentum(masked_pos_samples)
+                with torch.no_grad():
+                    masked_pos_batch = self.model.forward_momentum(masked_pos_samples)
                 
             
             neg_batch = F.normalize(neg_batch, p=2, dim=1)
@@ -691,7 +701,9 @@ class Trainer:
                 elif self.ablation == "No_MSE":
                     total_loss = contrastive_loss + 0.5*triplet_loss
                 else:
-                    total_loss = contrastive_loss + 0.5*triplet_loss + 0.2*mse_loss
+                    triplet_w = 0.5 
+                    mse_w = 0.2
+                    total_loss = contrastive_loss + triplet_w*triplet_loss + mse_w*mse_loss
                 
                 
                 running_loss_total += total_loss.item()
@@ -704,7 +716,7 @@ class Trainer:
 
             
         with open(self.log_file, 'a') as f:
-            f.write(f"\nEpoch {epoch}: Total Loss = {running_loss_total/len(self.train_loader):.6f}, Contrastive Loss = {running_loss_contrastive/len(self.train_loader):.6f}, Triplet Loss = {running_loss_triplet/len(self.train_loader):.6f}, MSE loss = {running_loss_mse/len(self.train_loader):.6f}, Positive distance = {running_post_dist/len(self.train_loader):.6f}, Negative distance = {running_neg_dist/len(self.train_loader):.6f}, Margin violations: {running_margin_violations/len(self.train_loader)}, Total k: {total_k} \n")
+            f.write(f"\nEpoch {epoch}: Total Loss = {running_loss_total/len(self.train_loader):.6f}, Contrastive Loss = {running_loss_contrastive/len(self.train_loader):.6f}, Triplet Loss = {running_loss_triplet/len(self.train_loader):.6f}, MSE loss = {running_loss_mse/len(self.train_loader):.6f}, Positive distance = {running_post_dist/len(self.train_loader):.6f}, Negative distance = {running_neg_dist/len(self.train_loader):.6f}, Margin violations: {running_margin_violations/len(self.train_loader)}, Total k: {total_k}, Triplet_w: {triplet_w}, mse_w: {mse_w}  \n")
         
         return running_loss_total/len(self.train_loader), running_loss_contrastive/len(self.train_loader), running_loss_triplet/len(self.train_loader), running_loss_mse/len(self.train_loader), prev_margin_violations, running_post_dist/len(self.train_loader), running_neg_dist/len(self.train_loader), running_margin_violations/len(self.train_loader)
     
