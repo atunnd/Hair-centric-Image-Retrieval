@@ -32,7 +32,7 @@ import faiss
 import numpy as np
 from lightly.utils.scheduler import cosine_schedule
 from lightly.models import utils
-from lightly.loss import MSNLoss
+from lightly.loss import MSNLoss, NegativeCosineSimilarity
 
 class Trainer:
     def __init__(self, model, train_loader, val_loader, args):
@@ -87,6 +87,8 @@ class Trainer:
             self.criterion_local = NTXentLoss(memory_bank_size=(4096, 512))
         elif self.mode == "MSN":
             self.criterion = MSNLoss()
+        elif self.mode == "BYOL":
+            self.criterion = NegativeCosineSimilarity()
         elif self.mode == "SHAM":
             self.criterion1 = NTXentLoss(temperature=args.temp)
             self.criterion2 = DistillationLoss()
@@ -327,6 +329,37 @@ class Trainer:
                 images = views[0].to(self.device)
                 predictions, targets = self.model(images)
                 loss = self.criterion(predictions, targets)
+                running_loss += loss.detach()
+            #loss.backward()
+            scaler.scale(loss).backward()
+            #self.optimizer.step()
+            scaler.step(self.optimizer)
+            scaler.update()
+            self.optimizer.zero_grad()
+        
+        with open(self.log_file, 'a') as f:
+            f.write(f"\nEpoch {epoch}: Total Loss = {running_loss/len(self.train_loader):.6f}\n")
+
+        return running_loss / len(self.train_loader)
+    
+    def train_one_epoch_BYOL(self, epoch=0, alpha=0, scaler=None):
+        self.model.train()
+        running_loss = 0.0
+        momentum_val = cosine_schedule(epoch, self.epochs, 0.996, 1)
+        for batch in tqdm(self.train_loader, desc="Training"):
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                x0, x1 = batch[0]
+                update_momentum(self.model.backbone, self.model.backbone_momentum, m=momentum_val)
+                update_momentum(
+                    self.model.projection_head, self.model.projection_head_momentum, m=momentum_val
+                )
+                x0 = x0.to(self.device)
+                x1 = x1.to(self.device)
+                p0 = self.model(x0)
+                z0 = self.model.forward_momentum(x0)
+                p1 = self.model(x1)
+                z1 = self.model.forward_momentum(x1)
+                loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
                 running_loss += loss.detach()
             #loss.backward()
             scaler.scale(loss).backward()
