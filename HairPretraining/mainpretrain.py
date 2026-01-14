@@ -7,7 +7,7 @@ from utils.transform import get_test_transform, get_train_transform, TwoCropTran
 from utils.dataloader import CustomDataset
 import torch
 from torch.utils.data import DataLoader
-from src.backbone import SupConResNet, SimCLR, MAE, DINOv2, SimMIM, DenseCL, MSN
+from src.backbone import SupConResNet, SimCLR, MAE, DINOv2, SimMIM, DenseCL, MSN, BYOL
 from src.main_backbone import SHAM2
 import torch
 import torchvision
@@ -19,6 +19,11 @@ from lightly.transforms.dino_transform import DINOTransform
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard import SummaryWriter
 from lightly.transforms.msn_transform import MSNTransform
+from lightly.transforms.byol_transform import (
+    BYOLTransform,
+    BYOLView1Transform,
+    BYOLView2Transform,
+)
 
 
 
@@ -53,7 +58,7 @@ def parse_args():
     parser.add_argument('--temp', type=float, default=0.5, help="temperature for loss function")
 
     # Model option
-    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'SHAM', 'S2R2', "DenseCL", "MSN"])
+    parser.add_argument('--mode', type=str, default='simclr_supcon', choices=['mae', 'simclr', 'simclr_supcon', 'dinov2', 'simMIM', 'SHAM', 'S2R2', "DenseCL", "MSN", "BYOL"])
     parser.add_argument('--model', type=str, default='resnet18', choices = ['resnet18', 'resnet50', "vit_b_16"])
 
     # Optional config
@@ -116,6 +121,11 @@ def main(args):
         train_transform = MSNTransform()
     elif args.mode == "DenseCL":
         train_transform = DenseCLTransform(input_size=224)
+    elif args.mode == "BYOL":
+        train_transform = BYOLTransform(
+                            view_1_transform=BYOLView1Transform(input_size=224, gaussian_blur=0.0),
+                            view_2_transform=BYOLView2Transform(input_size=224, gaussian_blur=0.0),
+                        )
     elif args.mode == "SHAM":
         train_transform = SimCLRTransform(input_size=224) 
 
@@ -153,6 +163,10 @@ def main(args):
     elif args.mode == "simMIM":
         vit = torchvision.models.vit_b_16(pretrained=False)
         model = SimMIM(vit)
+    elif args.mode == "BYOL":
+        resnet = torchvision.models.resnet50()
+        backbone = nn.Sequential(*list(resnet.children())[:-1])
+        model = BYOL(backbone)
     elif args.mode == "SHAM":
         model = SHAM2(model=args.model)
 
