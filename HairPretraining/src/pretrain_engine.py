@@ -680,7 +680,10 @@ class Trainer:
         
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 neg_batch = self.model(negative_samples)
-                pos_samples = positive_transform(x_pos_1)
+                if self.ablation == "No_pos_transform":
+                    pos_samples = x_pos_1
+                else:
+                    pos_samples = positive_transform(x_pos_1)
                 #pos_samples = x_pos_1
                 pos_batch = self.model(pos_samples)
                 anchor_batch = self.model(x_anchor)
