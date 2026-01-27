@@ -3,19 +3,23 @@
 Official implementation and benchmark for
 “A Self-Supervised Framework for Robust Hair-Centric Image Retrieval”
 
-🧠 Method: SHAM (Self-supervised Hard-negative curriculum Mining)
+🧠 Method: HSimCLR (Hair SimCLR)
 
 ## 🔍 Overview
 
+<p align="center">
+  <img src="./images/framework_overview.png" width="400"/>
+</p>
+
 This repository provides:
-1. SHAM, a self-supervised learning framework tailored for hair-centric representation learning
+1. HSimCLR, a self-supervised learning framework tailored for hair-centric representation learning
 
 2. Training & evaluation code for multiple backbones (ResNet, ViT)
 
 3. Scripts for reproducible experiments and evaluation
 
 ## Code Structure
-1. The main training code for SSL is in folder HairPretraining
+The main training code for SSL is in folder HairPretraining
 
 ```text
 HairPretraining/
