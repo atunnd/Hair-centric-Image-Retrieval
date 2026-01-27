@@ -8,7 +8,7 @@ Official implementation and benchmark for
 ## 🔍 Overview
 
 <p align="center">
-  <img src="./images/framework_overview.png" width="400"/>
+  <img src="./images/framework_overview.png" width="700"/>
 </p>
 
 This repository provides:
