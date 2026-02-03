@@ -1,5 +1,3 @@
-## SHAM: Self-Supervised Hard-negative Curriculum for Hair-Centric Image Retrieval
-
 Official implementation and benchmark for
 “A Self-Supervised Framework for Robust Hair-Centric Image Retrieval”
 
